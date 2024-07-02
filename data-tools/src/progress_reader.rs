@@ -4,7 +4,6 @@ use indicatif::{ProgressBar, ProgressStyle};
 pub struct ProgressReader<R: Read> {
     inner: R,
     progress_bar: ProgressBar,
-    total_size: u64,
     current: u64,
 }
 
@@ -19,7 +18,6 @@ impl<R: Read> ProgressReader<R> {
         ProgressReader {
             inner,
             progress_bar,
-            total_size,
             current: 0,
         }
     }
