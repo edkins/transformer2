@@ -3,8 +3,10 @@ use process_xml::ArticleError;
 mod process_wikitext;
 mod process_xml;
 mod progress_reader;
+mod split_words;
+mod word_counter;
 
-const MAX_ARTICLES_TO_PROCESS: usize = 50000;
+const MAX_ARTICLES_TO_PROCESS: usize = 5000;
 
 fn main() {
     let filename = "../enwiki-latest-pages-articles-multistream.xml.bz2";
@@ -18,6 +20,7 @@ fn main() {
     let mut count = 0;
     let time = std::time::Instant::now();
     let articles = process_xml::ArticleReader::new(bdecomp);
+    let mut word_counter = word_counter::WordCounter::new();
     for article in articles {
         match article {
             Ok(article) => {
@@ -29,9 +32,7 @@ fn main() {
                     break;
                 }
                 if let Some(plain_article) = process_wikitext::strip_wikitext(&article) {
-                    if count < 10 {
-                        println!("{plain_article}")
-                    }
+                    word_counter.add_document_split_into_words(&plain_article);
                 }
             }
             Err(ArticleError(e)) => {
@@ -41,4 +42,5 @@ fn main() {
         }
     }
     println!("Read {count} articles");
+    word_counter.dump();
 }
