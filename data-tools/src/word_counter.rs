@@ -1,6 +1,11 @@
 use std::collections::HashMap;
 
-use crate::split_words::SplitWords;
+use crate::{
+    bpe::{self, Bpe},
+    split_words::SplitWords,
+};
+
+const MIN_WORD_COUNT: u64 = 2;
 
 pub struct WordCounter {
     words: HashMap<Vec<u8>, u64>,
@@ -27,7 +32,7 @@ impl WordCounter {
     pub fn dump(&self) {
         let mut words: Vec<_> = self.words.iter().collect();
         words.sort_by_key(|&(_, count)| std::cmp::Reverse(count));
-        for (i,(word, &count)) in words.iter().enumerate().take(100) {
+        for (i, (word, &count)) in words.iter().enumerate().take(100) {
             print_word(i, word, count);
         }
         // Now show every thousandth word without enumerating every single item
@@ -38,11 +43,25 @@ impl WordCounter {
         //     }
         //     i += 1000;
         // }
-        println!("Total number of words: {}", words.len());
+        println!("Total number of distinct words: {}", words.len());
+        println!(
+            "Total number of words: {}",
+            words.iter().map(|(_, &count)| count).sum::<u64>()
+        );
+    }
+
+    pub fn into_bpe(self) -> Bpe {
+        let mut words: Vec<_> = self.words.into_iter().collect();
+        words.retain(|(_, count)| *count >= MIN_WORD_COUNT);
+        let words = words
+            .into_iter()
+            .map(|(word, count)| (bpe::word_to_tokens(&word), count))
+            .collect();
+        Bpe::new(words)
     }
 }
 
-fn print_word(i: usize, word: &[u8], count: u64) {
+pub fn print_word(i: usize, word: &[u8], count: u64) {
     if let Ok(string) = std::str::from_utf8(word) {
         println!("{} {:?}: {}", i, string, count);
     } else {

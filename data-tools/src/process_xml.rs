@@ -10,7 +10,9 @@ pub struct ArticleReader<R> {
 
 impl<R: BufRead> ArticleReader<R> {
     pub fn new(reader: R) -> Self {
-        ArticleReader { xml_reader: Reader::from_reader(reader) }
+        ArticleReader {
+            xml_reader: Reader::from_reader(reader),
+        }
     }
 }
 
@@ -42,7 +44,7 @@ impl<R: BufRead> Iterator for ArticleReader<R> {
                 }
                 Ok(Event::Eof) if !in_text => return None,
                 Ok(Event::Eof) => return Some(Err(ArticleError("EOF while in text".to_string()))),
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(e) => return Some(Err(ArticleError(format!("Error: {}", e)))),
             }
         }

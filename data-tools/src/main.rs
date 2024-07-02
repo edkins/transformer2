@@ -1,5 +1,6 @@
 use process_xml::ArticleError;
 
+mod bpe;
 mod process_wikitext;
 mod process_xml;
 mod progress_reader;
@@ -26,7 +27,11 @@ fn main() {
             Ok(article) => {
                 count += 1;
                 if count % 5000 == 0 {
-                    println!("{}: {}", (std::time::Instant::now() - time).as_secs(), count);
+                    println!(
+                        "{}: {}",
+                        (std::time::Instant::now() - time).as_secs(),
+                        count
+                    );
                 }
                 if count == MAX_ARTICLES_TO_PROCESS {
                     break;
@@ -43,4 +48,10 @@ fn main() {
     }
     println!("Read {count} articles");
     word_counter.dump();
+    let mut bpe = word_counter.into_bpe();
+    bpe.run();
+    let dict = bpe.into_dictionary();
+    for (i,token) in dict.iter().enumerate() {
+        word_counter::print_word(i, token, 0);
+    }
 }

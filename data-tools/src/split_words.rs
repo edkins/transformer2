@@ -1,15 +1,20 @@
-use nom::{branch::alt, bytes::complete::{tag, take}, character::complete::alpha1, combinator::{opt, recognize, value}, sequence::preceded, IResult};
+use nom::{
+    branch::alt,
+    bytes::complete::{tag, take},
+    character::complete::alpha1,
+    combinator::{opt, recognize, value},
+    sequence::preceded,
+    IResult,
+};
 
 pub struct SplitWords<'a> {
     /// The remaining text to split
-    text: &'a[u8],
+    text: &'a [u8],
 }
 
 impl<'a> SplitWords<'a> {
-    pub fn new(text: &'a[u8]) -> Self {
-        SplitWords {
-            text,
-        }
+    pub fn new(text: &'a [u8]) -> Self {
+        SplitWords { text }
     }
 }
 
@@ -25,7 +30,7 @@ fn maybe_space_word(i: &[u8]) -> IResult<&[u8], ()> {
 fn single_byte(i: &[u8]) -> IResult<&[u8], ()> {
     // match a single byte, not more than one
     // TODO: consume an entire utf-8 character, not just a single byte here
-    value((),take(1usize))(i)
+    value((), take(1usize))(i)
 }
 
 fn word_like_thing(i: &[u8]) -> IResult<&[u8], &[u8]> {
@@ -34,7 +39,7 @@ fn word_like_thing(i: &[u8]) -> IResult<&[u8], &[u8]> {
 }
 
 impl<'a> Iterator for SplitWords<'a> {
-    type Item = &'a[u8];
+    type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
         // Return None if we're at the end
@@ -49,4 +54,3 @@ impl<'a> Iterator for SplitWords<'a> {
         Some(wordlike)
     }
 }
-

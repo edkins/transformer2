@@ -2,7 +2,7 @@ use nom::{
     branch::alt,
     bytes::complete::tag,
     character::complete::{anychar, satisfy},
-    combinator::{recognize, map, value},
+    combinator::{map, recognize, value},
     multi::{many0, many1},
     sequence::{delimited, preceded},
     IResult,
@@ -35,7 +35,17 @@ fn template_contents(i: &str) -> IResult<&str, &str> {
 }
 
 fn template_items(i: &str) -> IResult<&str, &str> {
-    value("", many1(alt((template_contents, template, table, nowiki, reference, entity))))(i)
+    value(
+        "",
+        many1(alt((
+            template_contents,
+            template,
+            table,
+            nowiki,
+            reference,
+            entity,
+        ))),
+    )(i)
 }
 
 fn bold_or_italic(i: &str) -> IResult<&str, &str> {
@@ -60,7 +70,11 @@ fn nowiki_contents(i: &str) -> IResult<&str, &str> {
 }
 
 fn nowiki(i: &str) -> IResult<&str, &str> {
-    delimited(tag("&lt;nowiki&gt;"), nowiki_contents, tag("&lt;/nowiki&gt;"))(i)
+    delimited(
+        tag("&lt;nowiki&gt;"),
+        nowiki_contents,
+        tag("&lt;/nowiki&gt;"),
+    )(i)
 }
 
 fn reference(i: &str) -> IResult<&str, &str> {
@@ -68,11 +82,24 @@ fn reference(i: &str) -> IResult<&str, &str> {
 }
 
 fn image(i: &str) -> IResult<&str, &str> {
-    value("", delimited(alt((tag("[[image:"), tag("[[Image:"))), image_items, tag("]]")))(i)
+    value(
+        "",
+        delimited(
+            alt((tag("[[image:"), tag("[[Image:"))),
+            image_items,
+            tag("]]"),
+        ),
+    )(i)
 }
 
 fn plain_link(i: &str) -> IResult<&str, &str> {
-    map(delimited(tag("[["), link_contents, tag("]]")), |text| if text.contains(":") {""} else {text})(i)
+    map(delimited(tag("[["), link_contents, tag("]]")), |text| {
+        if text.contains(":") {
+            ""
+        } else {
+            text
+        }
+    })(i)
 }
 
 fn named_link(i: &str) -> IResult<&str, &str> {
@@ -85,7 +112,10 @@ fn named_link(i: &str) -> IResult<&str, &str> {
 }
 
 fn url(i: &str) -> IResult<&str, &str> {
-    recognize(preceded(alt((tag("http://"), tag("https://"))), url_contents))(i)
+    recognize(preceded(
+        alt((tag("http://"), tag("https://"))),
+        url_contents,
+    ))(i)
 }
 
 fn url_link(i: &str) -> IResult<&str, &str> {
@@ -110,7 +140,21 @@ fn character(i: &str) -> IResult<&str, &str> {
 }
 
 fn item(i: &str) -> IResult<&str, &str> {
-    alt((plain, bold_or_italic, heading, nowiki, reference, entity, image, plain_link, named_link, url_link, template, table, character))(i)
+    alt((
+        plain,
+        bold_or_italic,
+        heading,
+        nowiki,
+        reference,
+        entity,
+        image,
+        plain_link,
+        named_link,
+        url_link,
+        template,
+        table,
+        character,
+    ))(i)
 }
 
 pub fn strip_wikitext(input: &str) -> Option<String> {
