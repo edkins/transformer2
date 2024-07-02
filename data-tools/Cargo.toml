@@ -5,4 +5,5 @@ edition = "2021"
 
 [dependencies]
 bzip2 = "0.4.4"
+indicatif = "0.17.8"
 quick-xml = "0.35.0"

@@ -1,30 +1,44 @@
-use quick_xml::events::Event;
-use quick_xml::reader::Reader;
 use std::io::BufRead;
+
+use process_xml::ArticleError;
+
+mod process_xml;
+mod progress_reader;
 
 fn main() {
     let filename = "../enwiki-latest-pages-articles-multistream.xml.bz2";
+    let file_size = std::fs::metadata(filename).unwrap().len();
     let file = std::fs::File::open(filename).unwrap();
-    let decomp = bzip2::read::MultiBzDecoder::new(file);
+    let progress_file = progress_reader::ProgressReader::new(file, file_size);
+    let decomp = bzip2::read::MultiBzDecoder::new(progress_file);
     let bdecomp = std::io::BufReader::new(decomp);
-    parse_xml(bdecomp).unwrap();
-}
 
-fn parse_xml<R: BufRead>(reader: R) -> Result<(), Box<dyn std::error::Error>> {
-    let mut xml_reader = Reader::from_reader(reader);
-    let mut buf = Vec::new();
+    let time = std::time::Instant::now();
 
-    loop {
-        match xml_reader.read_event_into(&mut buf)? {
-            Event::Start(e) => println!("Start: {:?}", e.name()),
-            Event::End(e) => println!("End: {:?}", e.name()),
-            Event::Text(e) => println!("Text: {:?}", e.unescape()?),
-            Event::Eof => break,
-            _ => (), // There are other event types we're not handling here
+    for (i,line) in bdecomp.lines().enumerate() {
+        if i % 1000000 == 0 {
+            println!("{}: {}", (std::time::Instant::now() - time).as_secs(), i);
         }
-
-        buf.clear();
     }
+    return;
 
-    Ok(())
+    let articles = process_xml::ArticleReader::new(bdecomp);
+
+    let mut count = 0;
+    for article in articles {
+        match article {
+            Ok(article) => {
+                count += 1;
+                if count % 10000 == 0 {
+                    println!("{}", count);
+                }
+                //println!("{}", article);
+            }
+            Err(ArticleError(e)) => {
+                eprintln!("Error reading article {e}");
+                return;
+            }
+        }
+    }
+    println!("Read {count} articles");
 }
