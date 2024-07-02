@@ -50,8 +50,9 @@ fn main() {
     word_counter.dump();
     let mut bpe = word_counter.into_bpe();
     bpe.run();
+    let counts = bpe.get_token_counts();
     let dict = bpe.into_dictionary();
-    for (i,token) in dict.iter().enumerate() {
-        word_counter::print_word(i, token, 0);
+    for (i,(token, &count)) in dict.iter().zip(counts.iter()).enumerate() {
+        word_counter::print_word(i, token, count);
     }
 }

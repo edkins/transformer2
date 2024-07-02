@@ -70,6 +70,16 @@ impl Bpe {
     pub fn into_dictionary(self) -> Vec<Vec<u8>> {
         self.token_vocab
     }
+
+    pub fn get_token_counts(&self) -> Vec<u64> {
+        let mut result = vec![0; self.token_vocab.len()];
+        for (word, word_count) in &self.words {
+            for &token in word {
+                result[token as usize] += word_count;
+            }
+        }
+        result
+    }
 }
 
 fn substitute_pair(word: &mut Vec<Token>, t0: Token, t1: Token, new_token: Token) {
