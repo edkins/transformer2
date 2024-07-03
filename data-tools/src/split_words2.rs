@@ -7,14 +7,17 @@ use nom::{
     IResult,
 };
 
-pub struct SplitWords<'a> {
+use crate::ref_iterator::RefIterator;
+
+pub struct SplitWords {
     /// The remaining text to split
-    text: &'a str,
+    text: String,
+    pos: usize,
 }
 
-impl<'a> SplitWords<'a> {
-    pub fn new(text: &'a str) -> Self {
-        SplitWords { text }
+impl SplitWords {
+    pub fn new(text: String) -> Self {
+        SplitWords { text, pos:0 }
     }
 }
 
@@ -37,19 +40,22 @@ fn word_like_thing(i: &str) -> IResult<&str, &str> {
     recognize(alt((maybe_space_word, single_char)))(i)
 }
 
-impl<'a> Iterator for SplitWords<'a> {
-    type Item = &'a str;
+impl RefIterator for SplitWords {
+    type Item = str;
 
-    fn next(&mut self) -> Option<&'a str> {
+    fn next_and<T,G>(&mut self, g: G) -> Option<T>
+    where
+        G: FnOnce(&Self::Item) -> T
+    {
         // Return None if we're at the end
-        if self.text.is_empty() {
+        if self.pos == self.text.len() {
             return None;
         }
 
         // Otherwise try to consume a word_like_thing
-        let (rest, wordlike) = word_like_thing(self.text).expect("Shouldn't really happen");
-        self.text = rest;
+        let (_, wordlike) = word_like_thing(&self.text).expect("Shouldn't really happen");
+        self.pos += wordlike.len();
 
-        Some(wordlike)
+        Some(g(wordlike))
     }
 }

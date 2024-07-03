@@ -1,6 +1,8 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, io::Write};
 
-pub type Token = u32;
+use base64::{prelude::BASE64_STANDARD, Engine};
+
+type Token = u32;
 
 const NUM_TOKENS_TO_GENERATE: usize = 2000;
 
@@ -69,6 +71,14 @@ impl Bpe {
 
     pub fn into_dictionary(self) -> Vec<Vec<u8>> {
         self.token_vocab
+    }
+
+    pub fn write_to_file(&self, filename: &str) {
+        let mut file = std::fs::File::create(filename).unwrap();
+        for token in &self.token_vocab {
+            file.write_all(BASE64_STANDARD.encode(token).as_bytes()).unwrap();
+            file.write_all(b"\n").unwrap();
+        }
     }
 
     pub fn get_token_counts(&self) -> Vec<u64> {

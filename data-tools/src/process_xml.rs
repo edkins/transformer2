@@ -2,8 +2,6 @@ use std::io::BufRead;
 
 use quick_xml::{events::Event, Reader};
 
-pub struct ArticleError(pub String);
-
 pub struct ArticleReader<R> {
     xml_reader: Reader<R>,
 }
@@ -17,7 +15,7 @@ impl<R: BufRead> ArticleReader<R> {
 }
 
 impl<R: BufRead> Iterator for ArticleReader<R> {
-    type Item = Result<String, ArticleError>;
+    type Item = String;
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut buf = Vec::new();
@@ -34,7 +32,7 @@ impl<R: BufRead> Iterator for ArticleReader<R> {
                 Ok(Event::End(e)) => {
                     let tag = e.local_name().into_inner();
                     if tag == b"text" {
-                        return Some(Ok(article));
+                        return Some(article);
                     }
                 }
                 Ok(Event::Text(e)) => {
@@ -43,9 +41,15 @@ impl<R: BufRead> Iterator for ArticleReader<R> {
                     }
                 }
                 Ok(Event::Eof) if !in_text => return None,
-                Ok(Event::Eof) => return Some(Err(ArticleError("EOF while in text".to_string()))),
+                Ok(Event::Eof) => {
+                    println!("EOF while in text");
+                    return None;
+                }
                 Ok(_) => {}
-                Err(e) => return Some(Err(ArticleError(format!("Error: {}", e)))),
+                Err(e) => {
+                    println!("{}", e);
+                    return None;
+                }
             }
         }
     }

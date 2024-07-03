@@ -1,33 +1,33 @@
 use std::collections::HashMap;
 
 use crate::{
-    bpe::{self, Bpe},
-    split_words::SplitWords,
+    bpe::{self, Bpe}, ref_iterator::FeedRef,
 };
 
 const MIN_WORD_COUNT: u64 = 2;
 
+#[derive(Default)]
 pub struct WordCounter {
     words: HashMap<Vec<u8>, u64>,
 }
 
-impl WordCounter {
-    pub fn new() -> Self {
-        WordCounter {
-            words: HashMap::new(),
-        }
+impl FeedRef<str> for WordCounter {
+    fn feed_ref(&mut self, item: &str) {
+        self.add_word(item.as_bytes());
     }
+}
 
+impl WordCounter {
     pub fn add_word(&mut self, word: &[u8]) {
         let count = self.words.entry(word.to_vec()).or_insert(0);
         *count += 1;
     }
 
-    pub fn add_document_split_into_words(&mut self, document: &str) {
-        for word in SplitWords::new(document.as_bytes()) {
-            self.add_word(word);
-        }
-    }
+    // pub fn add_document_split_into_words(&mut self, document: &str) {
+    //     for word in SplitWords::new(document.as_bytes()) {
+    //         self.add_word(word);
+    //     }
+    // }
 
     pub fn dump(&self) {
         let mut words: Vec<_> = self.words.iter().collect();
@@ -68,3 +68,13 @@ pub fn print_word(i: usize, word: &[u8], count: u64) {
         println!("{} {:?}: {}", i, word, count);
     }
 }
+
+// impl<'a> FromIterator<&'a[u8]> for WordCounter {
+//     fn from_iter<I: IntoIterator<Item = &'a[u8]>>(iter: I) -> Self {
+//         let mut counter = WordCounter::new();
+//         for word in iter {
+//             counter.add_word(word)
+//         }
+//         counter
+//     }
+// }

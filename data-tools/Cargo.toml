@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+base64 = "0.22.1"
 bzip2 = "0.4.4"
 indicatif = "0.17.8"
 nom = "7.1.3"

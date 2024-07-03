@@ -157,12 +157,12 @@ fn item(i: &str) -> IResult<&str, &str> {
     ))(i)
 }
 
-pub fn strip_wikitext(input: &str) -> Option<String> {
+pub fn strip_wikitext(input: String) -> Option<String> {
     if input.starts_with("#REDIRECT ") {
         None
     } else {
         let mut result = String::new();
-        if let Ok((_, items)) = many0(item)(input) {
+        if let Ok((_, items)) = many0(item)(&input) {
             for item in &items {
                 result.push_str(item);
             }
