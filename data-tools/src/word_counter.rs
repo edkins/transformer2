@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    bpe::{self, Bpe}, ref_iterator::FeedRef,
+    bpe::{self, Bpe}, split_words::Word,
 };
 
 const MIN_WORD_COUNT: u64 = 2;
@@ -11,14 +11,12 @@ pub struct WordCounter {
     words: HashMap<Vec<u8>, u64>,
 }
 
-impl FeedRef<str> for WordCounter {
-    fn feed_ref(&mut self, item: &str) {
-        self.add_word(item.as_bytes());
-    }
-}
-
 impl WordCounter {
-    pub fn add_word(&mut self, word: &[u8]) {
+    pub fn add_word(&mut self, word: Word) {
+        self.add_word_bytes(word.as_bytes());
+    }
+    
+    pub fn add_word_bytes(&mut self, word: &[u8]) {
         let count = self.words.entry(word.to_vec()).or_insert(0);
         *count += 1;
     }
@@ -29,26 +27,18 @@ impl WordCounter {
     //     }
     // }
 
-    pub fn dump(&self) {
-        let mut words: Vec<_> = self.words.iter().collect();
-        words.sort_by_key(|&(_, count)| std::cmp::Reverse(count));
-        for (i, (word, &count)) in words.iter().enumerate().take(100) {
-            print_word(i, word, count);
-        }
-        // Now show every thousandth word without enumerating every single item
-        // let mut i = 0;
-        // while i < words.len() {
-        //     if i >= 100 {
-        //         print_word(i, &words[i].0, *words[i].1);
-        //     }
-        //     i += 1000;
-        // }
-        println!("Total number of distinct words: {}", words.len());
-        println!(
-            "Total number of words: {}",
-            words.iter().map(|(_, &count)| count).sum::<u64>()
-        );
-    }
+    // pub fn dump(&self) {
+    //     let mut words: Vec<_> = self.words.iter().collect();
+    //     words.sort_by_key(|&(_, count)| std::cmp::Reverse(count));
+    //     for (i, (word, &count)) in words.iter().enumerate().take(100) {
+    //         print_word(i, word, count);
+    //     }
+    //     println!("Total number of distinct words: {}", words.len());
+    //     println!(
+    //         "Total number of words: {}",
+    //         words.iter().map(|(_, &count)| count).sum::<u64>()
+    //     );
+    // }
 
     pub fn into_bpe(self) -> Bpe {
         let mut words: Vec<_> = self.words.into_iter().collect();
@@ -57,24 +47,24 @@ impl WordCounter {
             .into_iter()
             .map(|(word, count)| (bpe::word_to_tokens(&word), count))
             .collect();
-        Bpe::new(words)
+        Bpe::new_and_run(words)
     }
 }
 
-pub fn print_word(i: usize, word: &[u8], count: u64) {
-    if let Ok(string) = std::str::from_utf8(word) {
-        println!("{} {:?}: {}", i, string, count);
-    } else {
-        println!("{} {:?}: {}", i, word, count);
-    }
-}
-
-// impl<'a> FromIterator<&'a[u8]> for WordCounter {
-//     fn from_iter<I: IntoIterator<Item = &'a[u8]>>(iter: I) -> Self {
-//         let mut counter = WordCounter::new();
-//         for word in iter {
-//             counter.add_word(word)
-//         }
-//         counter
+// pub fn print_word(i: usize, word: &[u8], count: u64) {
+//     if let Ok(string) = std::str::from_utf8(word) {
+//         println!("{} {:?}: {}", i, string, count);
+//     } else {
+//         println!("{} {:?}: {}", i, word, count);
 //     }
 // }
+
+impl FromIterator<Word> for WordCounter {
+    fn from_iter<I: IntoIterator<Item = Word>>(iter: I) -> Self {
+        let mut counter = WordCounter::default();
+        for word in iter {
+            counter.add_word(word)
+        }
+        counter
+    }
+}

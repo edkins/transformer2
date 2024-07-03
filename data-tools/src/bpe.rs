@@ -12,11 +12,13 @@ pub struct Bpe {
 }
 
 impl Bpe {
-    pub fn new(words: Vec<(Vec<Token>, u64)>) -> Self {
-        Bpe {
+    pub fn new_and_run(words: Vec<(Vec<Token>, u64)>) -> Self {
+        let mut result = Bpe {
             words,
             token_vocab: (0..=255).map(|x| [x].to_vec()).collect(),
-        }
+        };
+        result.run();
+        result
     }
 
     fn find_most_common_pair(&self) -> Option<(Token, Token)> {
@@ -69,9 +71,9 @@ impl Bpe {
         }
     }
 
-    pub fn into_dictionary(self) -> Vec<Vec<u8>> {
-        self.token_vocab
-    }
+    // pub fn into_dictionary(self) -> Vec<Vec<u8>> {
+    //     self.token_vocab
+    // }
 
     pub fn write_to_file(&self, filename: &str) {
         let mut file = std::fs::File::create(filename).unwrap();
@@ -81,15 +83,15 @@ impl Bpe {
         }
     }
 
-    pub fn get_token_counts(&self) -> Vec<u64> {
-        let mut result = vec![0; self.token_vocab.len()];
-        for (word, word_count) in &self.words {
-            for &token in word {
-                result[token as usize] += word_count;
-            }
-        }
-        result
-    }
+    // pub fn get_token_counts(&self) -> Vec<u64> {
+    //     let mut result = vec![0; self.token_vocab.len()];
+    //     for (word, word_count) in &self.words {
+    //         for &token in word {
+    //             result[token as usize] += word_count;
+    //         }
+    //     }
+    //     result
+    // }
 }
 
 fn substitute_pair(word: &mut Vec<Token>, t0: Token, t1: Token, new_token: Token) {
