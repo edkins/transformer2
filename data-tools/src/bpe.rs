@@ -29,20 +29,22 @@ impl PairCounter {
             entry.0 += word_count; // Note: if we see the same pair multiple times in the same word, we will count it multiple times
             if entry.1.last() != Some(&word_id) {
                 entry.1.push(word_id);
+                //if !is_beginning {println!("Added pair: {:?}", pair);}
             }
             prev = token;
         }
     }
     
-    fn sub_token_pairs(&mut self, word: &[Token], word_count: u64, word_id: usize) {
+    fn subtract_token_pairs(&mut self, word: &[Token], word_count: u64, _word_id: usize) {
         let mut prev = word[0];
         for &token in &word[1..] {
             let pair = (prev, token);
             let entry = self.0.get_mut(&pair).expect("Doesn't make sense for a pair from a word to be missing");
-            entry.0.checked_sub(word_count).expect("Subtracting word count isn't supposed to make it negative");
-            entry.1.retain(|&x|x != word_id); // TODO: This is O(n) and could be improved
+            entry.0 = entry.0.checked_sub(word_count).expect("Subtracting word count isn't supposed to make it negative");
+            //entry.1.retain(|&x|x != word_id); // TODO: This is O(n) and could be improved
             if entry.0 == 0 {
                 self.0.remove(&pair);
+                //println!("Removed pair: {:?}", pair);
             }
             prev = token;
         }
@@ -79,12 +81,17 @@ impl Bpe {
     fn substitute_pair(&mut self, t0: Token, t1: Token, new_token: Token) {
         // let mut updated_count = 0;
 
-        for i in self.pairs.get_words_containing_token_pair(t0, t1) {
-            let (word, word_count) = &mut self.words[i];
-            self.pairs.sub_token_pairs(word, *word_count, i);
-            substitute_pair(word, t0, t1, new_token);
-            self.pairs.add_token_pairs(word, *word_count, i);
-            // updated_count += 1;
+        let word_ids = self.pairs.get_words_containing_token_pair(t0, t1);
+        //println!("Token: {}. Found {} words", new_token, words.len());
+        for i in word_ids {
+            if contains_pair(&self.words[i].0, t0, t1) {
+                //println!("New token: {}. Relevant word = {}", new_token, i);
+                let (word, word_count) = &mut self.words[i];
+                self.pairs.subtract_token_pairs(word, *word_count, i);
+                substitute_pair_in_word(word, t0, t1, new_token);
+                self.pairs.add_token_pairs(word, *word_count, i);
+                // updated_count += 1;
+            }
         }
 
         // for i in 0..self.words.len() {
@@ -149,18 +156,18 @@ impl Bpe {
     // }
 }
 
-// fn contains_pair(word: &[Token], t0: Token, t1: Token) -> bool {
-//     for i in 0..word.len() - 1 {
-//         if word[i] == t0 && word[i + 1] == t1 {
-//             return true;
-//         }
-//     }
-//     false
-// }
+fn contains_pair(word: &[Token], t0: Token, t1: Token) -> bool {
+    for i in 0..word.len() - 1 {
+        if word[i] == t0 && word[i + 1] == t1 {
+            return true;
+        }
+    }
+    false
+}
 
-fn substitute_pair(word: &mut Vec<Token>, t0: Token, t1: Token, new_token: Token) {
-    let mut i = 0;
-    let mut j = 0;
+fn substitute_pair_in_word(word: &mut Vec<Token>, t0: Token, t1: Token, new_token: Token) {
+    let mut i = 0; // where we're reading from
+    let mut j = 0; // where we're writing to
     while i < word.len() {
         if word[i] == t0 && i + 1 < word.len() && word[i + 1] == t1 {
             word[j] = new_token;
