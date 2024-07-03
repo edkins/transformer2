@@ -64,13 +64,16 @@ impl Bpe {
     }
 
     fn substitute_pair(&mut self, t0: Token, t1: Token, new_token: Token) {
+        let mut updated_count = 0;
         for (word, word_count) in &mut self.words {
             if contains_pair(word, t0, t1) {
                 self.pairs.sub_token_pairs(word, *word_count);
                 substitute_pair(word, t0, t1, new_token);
                 self.pairs.add_token_pairs(word, *word_count);
+                updated_count += 1;
             }
         }
+        println!("Token: {}. Updated {}/{} words", new_token, updated_count, self.words.len());
     }
 
     fn step(&mut self) -> bool {
