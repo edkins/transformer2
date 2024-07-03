@@ -1,3 +1,6 @@
 /target/
 /dictionary.txt
 /tokenized.bin
+/perf.data
+/perf.data.old
+/flamegraph.svg

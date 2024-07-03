@@ -1,5 +1,7 @@
-use std::io::{BufRead, Write};
+use std::io::{BufRead, BufReader, Write};
+use std::str;
 
+use base64::{prelude::BASE64_STANDARD, Engine};
 use clap::{Parser, Subcommand};
 use word_counter::WordCounter;
 
@@ -22,14 +24,20 @@ struct Args {
     subcmd: Command,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, PartialEq, Eq)]
 enum Command {
     Dictionary {},
     Tokenize {},
+    Print {}
 }
 
 fn main() {
     let cli = Args::parse();
+
+    if cli.subcmd == (Command::Print{}) {
+        print_dict();
+        return;
+    }
 
     let filename = CORPUS_FILENAME;
     let file_size = std::fs::metadata(filename).unwrap().len();
@@ -42,6 +50,26 @@ fn main() {
     match cli.subcmd {
         Command::Dictionary {} => dictionary(bdecomp),
         Command::Tokenize {} => tokenize(bdecomp),
+        _ => {}
+    }
+}
+
+fn byte_to_quoted_string(bytes: &[u8]) -> String {
+    if str::from_utf8(bytes).is_ok() {
+        format!("{:?}", str::from_utf8(bytes).unwrap())
+    } else {
+        format!("{:?}", bytes)
+    }
+}
+
+fn print_dict() {
+    let dictionary = std::fs::File::open(DICTIONARY_FILENAME).unwrap();
+    for (i,token) in BufReader::new(dictionary)
+        .lines()
+        .map(|line| BASE64_STANDARD.decode(line.unwrap()).unwrap())
+        .enumerate()
+    {
+        println!("{} {}", i, byte_to_quoted_string(&token));
     }
 }
 

@@ -6,47 +6,75 @@ type Token = u32;
 
 const NUM_TOKENS_TO_GENERATE: usize = 2000;
 
+struct PairCounter(HashMap<(Token, Token), u64>);
+
+impl PairCounter {
+    fn new_from_words(words: &[(Vec<Token>, u64)]) -> Self {
+        let mut result = PairCounter(HashMap::new());
+        for (word, word_count) in words {
+            result.add_token_pairs(word, *word_count);
+        }
+        result
+    }
+
+    fn find_most_common_pair(&self) -> Option<(Token, Token)> {
+        self.0.iter().max_by_key(|&(_, count)| count).map(|(&pair, _)| pair)
+    }
+
+    fn add_token_pairs(&mut self, word: &[Token], word_count: u64) {
+        let mut prev = word[0];
+        for &token in &word[1..] {
+            let pair = (prev, token);
+            let count = self.0.entry(pair).or_insert(0);
+            *count += word_count;
+            prev = token;
+        }
+    }
+
+    fn sub_token_pairs(&mut self, word: &[Token], word_count: u64) {
+        let mut prev = word[0];
+        for &token in &word[1..] {
+            let pair = (prev, token);
+            let count = self.0.get_mut(&pair).unwrap();
+            *count -= word_count;
+            if *count == 0 {
+                self.0.remove(&pair);
+            }
+            prev = token;
+        }
+    }
+}
+
 pub struct Bpe {
     words: Vec<(Vec<Token>, u64)>,
     token_vocab: Vec<Vec<u8>>,
+    pairs: PairCounter,
 }
 
 impl Bpe {
     pub fn new_and_run(words: Vec<(Vec<Token>, u64)>) -> Self {
         let mut result = Bpe {
-            words,
             token_vocab: (0..=255).map(|x| [x].to_vec()).collect(),
+            pairs: PairCounter::new_from_words(&words),
+            words,
         };
+
         result.run();
         result
     }
 
-    fn find_most_common_pair(&self) -> Option<(Token, Token)> {
-        let mut pairs = HashMap::new();
-        for (word, word_count) in &self.words {
-            let mut prev = word[0];
-            for &token in &word[1..] {
-                let pair = (prev, token);
-                let count = pairs.entry(pair).or_insert(0);
-                *count += word_count;
-                prev = token;
-            }
-        }
-        if pairs.is_empty() {
-            None
-        } else {
-            Some(pairs.into_iter().max_by_key(|&(_, count)| count).unwrap().0)
-        }
-    }
-
     fn substitute_pair(&mut self, t0: Token, t1: Token, new_token: Token) {
-        for (word, _) in &mut self.words {
-            substitute_pair(word, t0, t1, new_token);
+        for (word, word_count) in &mut self.words {
+            if contains_pair(word, t0, t1) {
+                self.pairs.sub_token_pairs(word, *word_count);
+                substitute_pair(word, t0, t1, new_token);
+                self.pairs.add_token_pairs(word, *word_count);
+            }
         }
     }
 
     fn step(&mut self) -> bool {
-        if let Some((t0, t1)) = self.find_most_common_pair() {
+        if let Some((t0, t1)) = self.pairs.find_most_common_pair() {
             let new_token = self.token_vocab.len() as Token;
             self.substitute_pair(t0, t1, new_token);
             self.token_vocab.push(
@@ -93,6 +121,17 @@ impl Bpe {
     //     }
     //     result
     // }
+}
+
+fn contains_pair(word: &[Token], t0: Token, t1: Token) -> bool {
+    let mut i = 0;
+    while i < word.len() {
+        if word[i] == t0 && i + 1 < word.len() && word[i + 1] == t1 {
+            return true;
+        }
+        i += 1;
+    }
+    false
 }
 
 fn substitute_pair(word: &mut Vec<Token>, t0: Token, t1: Token, new_token: Token) {
