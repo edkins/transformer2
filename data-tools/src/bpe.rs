@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::Write};
+use std::{collections::{HashMap, HashSet}, io::Write};
 
 use base64::{prelude::BASE64_STANDARD, Engine};
 
@@ -6,7 +6,7 @@ type Token = u32;
 
 const NUM_TOKENS_TO_GENERATE: usize = 2000;
 
-struct PairCounter(HashMap<(Token, Token), (u64, Vec<usize>)>);
+struct PairCounter(HashMap<(Token, Token), (u64, HashSet<usize>)>);
 
 impl PairCounter {
     fn new_from_words(words: &[(Vec<Token>, u64)]) -> Self {
@@ -18,30 +18,28 @@ impl PairCounter {
     }
 
     fn find_most_common_pair(&self) -> Option<(Token, Token)> {
-        self.0.iter().max_by_key(|&(_, count)| count).map(|(&pair, _)| pair)
+        self.0.iter().max_by_key(|&(_, (count,_))| count).map(|(&pair, _)| pair)
     }
 
     fn add_token_pairs(&mut self, word: &[Token], word_count: u64, word_id: usize) {
         let mut prev = word[0];
         for &token in &word[1..] {
             let pair = (prev, token);
-            let entry = self.0.entry(pair).or_insert_with(|| (0, Vec::new()));
+            let entry = self.0.entry(pair).or_insert_with(|| (0, HashSet::new()));
             entry.0 += word_count; // Note: if we see the same pair multiple times in the same word, we will count it multiple times
-            if entry.1.last() != Some(&word_id) {
-                entry.1.push(word_id);
-                //if !is_beginning {println!("Added pair: {:?}", pair);}
-            }
+            entry.1.insert(word_id);
             prev = token;
         }
     }
     
-    fn subtract_token_pairs(&mut self, word: &[Token], word_count: u64, _word_id: usize) {
+    fn subtract_token_pairs(&mut self, word: &[Token], word_count: u64, word_id: usize) {
         let mut prev = word[0];
         for &token in &word[1..] {
             let pair = (prev, token);
             let entry = self.0.get_mut(&pair).expect("Doesn't make sense for a pair from a word to be missing");
             entry.0 = entry.0.checked_sub(word_count).expect("Subtracting word count isn't supposed to make it negative");
             //entry.1.retain(|&x|x != word_id); // TODO: This is O(n) and could be improved
+            entry.1.remove(&word_id);
             if entry.0 == 0 {
                 self.0.remove(&pair);
                 //println!("Removed pair: {:?}", pair);
@@ -53,7 +51,7 @@ impl PairCounter {
     fn get_words_containing_token_pair(&self, t0: Token, t1: Token) -> Vec<usize> {
 //        self.0.get(&(t0, t1)).map(|x|&x.1).into_iter().flatten().cloned()
         if let Some(v) = self.0.get(&(t0, t1)) {
-            v.1.clone()
+            v.1.iter().cloned().collect()
         } else {
             vec![]
         }
