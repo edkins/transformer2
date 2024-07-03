@@ -94,7 +94,7 @@ fn image(i: &str) -> IResult<&str, &str> {
 
 fn plain_link(i: &str) -> IResult<&str, &str> {
     map(delimited(tag("[["), link_contents, tag("]]")), |text| {
-        if text.contains(":") {
+        if text.contains(':') {
             ""
         } else {
             text

@@ -1,4 +1,3 @@
-use split_words::SplitWords;
 use word_counter::WordCounter;
 
 mod bpe;
@@ -19,7 +18,7 @@ fn main() {
     let bfile = std::io::BufReader::new(progress_file);
     let decomp = bzip2::read::MultiBzDecoder::new(bfile);
     let bdecomp = std::io::BufReader::new(decomp);
-    
+
     process_xml::ArticleReader::new(bdecomp)
         .filter_map(process_wikitext::strip_wikitext)
         .take(MAX_ARTICLES_TO_PROCESS)

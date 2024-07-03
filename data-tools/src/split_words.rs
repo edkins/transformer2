@@ -2,7 +2,7 @@ use nom::{
     branch::alt,
     bytes::complete::{tag, take_while_m_n},
     character::complete::anychar,
-    combinator::{opt, recognize, value},
+    combinator::{recognize, value},
     sequence::preceded,
     IResult,
 };
@@ -11,12 +11,12 @@ const MAX_WORD_LENGTH: usize = 24;
 
 pub struct Word {
     length: usize,
-    bytes: [u8;MAX_WORD_LENGTH],
+    bytes: [u8; MAX_WORD_LENGTH],
 }
 
 impl Word {
     pub fn from_str(s: &str) -> Self {
-        let mut bytes = [0;MAX_WORD_LENGTH];
+        let mut bytes = [0; MAX_WORD_LENGTH];
         let length = s.len();
         if length > MAX_WORD_LENGTH {
             panic!("Word too long: {}", s);
@@ -43,12 +43,21 @@ impl SplitWords {
 }
 
 fn word(i: &str) -> IResult<&str, ()> {
-    value((), take_while_m_n(1, MAX_WORD_LENGTH, |c:char| c.is_ascii_alphabetic()))(i)
+    value(
+        (),
+        take_while_m_n(1, MAX_WORD_LENGTH, |c: char| c.is_ascii_alphabetic()),
+    )(i)
 }
 
 fn space_word(i: &str) -> IResult<&str, ()> {
     // a word preceded by a space
-    preceded(tag(" "), value((), take_while_m_n(1, MAX_WORD_LENGTH - 1, |c:char| c.is_ascii_alphabetic())))(i)
+    preceded(
+        tag(" "),
+        value(
+            (),
+            take_while_m_n(1, MAX_WORD_LENGTH - 1, |c: char| c.is_ascii_alphabetic()),
+        ),
+    )(i)
 }
 
 fn single_char(i: &str) -> IResult<&str, ()> {
@@ -66,12 +75,13 @@ impl Iterator for SplitWords {
 
     fn next(&mut self) -> Option<Self::Item> {
         // Return None if we're at the end
-        if self.pos >= self.text.len(){
+        if self.pos >= self.text.len() {
             return None;
         }
 
         // Otherwise try to consume a word_like_thing
-        let (_, wordlike) = word_like_thing(&self.text[self.pos..]).expect("Shouldn't really happen");
+        let (_, wordlike) =
+            word_like_thing(&self.text[self.pos..]).expect("Shouldn't really happen");
         self.pos += wordlike.len();
 
         Some(Word::from_str(wordlike))

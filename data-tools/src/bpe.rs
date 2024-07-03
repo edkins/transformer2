@@ -78,7 +78,8 @@ impl Bpe {
     pub fn write_to_file(&self, filename: &str) {
         let mut file = std::fs::File::create(filename).unwrap();
         for token in &self.token_vocab {
-            file.write_all(BASE64_STANDARD.encode(token).as_bytes()).unwrap();
+            file.write_all(BASE64_STANDARD.encode(token).as_bytes())
+                .unwrap();
             file.write_all(b"\n").unwrap();
         }
     }

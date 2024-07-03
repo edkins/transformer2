@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use crate::{
-    bpe::{self, Bpe}, split_words::Word,
+    bpe::{self, Bpe},
+    split_words::Word,
 };
 
 const MIN_WORD_COUNT: u64 = 2;
@@ -15,7 +16,7 @@ impl WordCounter {
     pub fn add_word(&mut self, word: Word) {
         self.add_word_bytes(word.as_bytes());
     }
-    
+
     pub fn add_word_bytes(&mut self, word: &[u8]) {
         let count = self.words.entry(word.to_vec()).or_insert(0);
         *count += 1;
