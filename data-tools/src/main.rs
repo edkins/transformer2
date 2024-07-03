@@ -33,6 +33,7 @@ enum Command {
 
 fn main() {
     let cli = Args::parse();
+    let time = std::time::Instant::now();
 
     if cli.subcmd == (Command::Print{}) {
         print_dict();
@@ -52,6 +53,8 @@ fn main() {
         Command::Tokenize {} => tokenize(bdecomp),
         _ => {}
     }
+
+    println!("Elapsed time: {:?}", time.elapsed());
 }
 
 fn byte_to_quoted_string(bytes: &[u8]) -> String {

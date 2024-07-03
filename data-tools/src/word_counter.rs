@@ -42,13 +42,16 @@ impl WordCounter {
     // }
 
     pub fn into_bpe(self) -> Bpe {
+        let time = std::time::Instant::now();
         let mut words: Vec<_> = self.words.into_iter().collect();
         words.retain(|(_, count)| *count >= MIN_WORD_COUNT);
         let words = words
             .into_iter()
             .map(|(word, count)| (bpe::word_to_tokens(&word), count))
             .collect();
-        Bpe::new_and_run(words)
+        let res = Bpe::new_and_run(words);
+        println!("Elapsed time for into_bpe: {:?}", time.elapsed());
+        res
     }
 }
 
