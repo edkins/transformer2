@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 use word_counter::WordCounter;
 
 mod bpe;
+mod process_bz2;
 mod process_wikitext;
 mod process_xml;
 mod progress_reader;
@@ -14,7 +15,6 @@ mod tokenize;
 mod word_counter;
 
 const MAX_ARTICLES_TO_PROCESS: usize = 5000;
-const CORPUS_FILENAME: &str = "../enwiki-latest-pages-articles-multistream.xml.bz2";
 const DICTIONARY_FILENAME: &str = "dictionary.txt";
 const TOKENIZED_FILE: &str = "tokenized.bin";
 
@@ -26,35 +26,38 @@ struct Args {
 
 #[derive(Subcommand, PartialEq, Eq)]
 enum Command {
-    Dictionary {},
-    Tokenize {},
-    Print {}
+    Dictionary {
+        filename: String,
+    },
+    Tokenize {
+        filename: String,
+    },
+    Print {},
+    Split {
+        filename: String,
+    }
 }
 
 fn main() {
     let cli = Args::parse();
     let time = std::time::Instant::now();
 
-    if cli.subcmd == (Command::Print{}) {
-        print_dict();
-        return;
-    }
-
-    let filename = CORPUS_FILENAME;
-    let file_size = std::fs::metadata(filename).unwrap().len();
-    let file = std::fs::File::open(filename).unwrap();
-    let progress_file = progress_reader::ProgressReader::new(file, file_size);
-    let bfile = std::io::BufReader::new(progress_file);
-    let decomp = bzip2::read::MultiBzDecoder::new(bfile);
-    let bdecomp = std::io::BufReader::new(decomp);
-
     match cli.subcmd {
-        Command::Dictionary {} => dictionary(bdecomp),
-        Command::Tokenize {} => tokenize(bdecomp),
-        _ => {}
+        Command::Dictionary { filename } => dictionary(&filename),
+        Command::Tokenize { filename } => tokenize(&filename),
+        Command::Print{} => print_dict(),
+        Command::Split{ filename } => println!("{:?}", process_bz2::find_bz2_streams(&filename)),
     }
 
     println!("Elapsed time: {:?}", time.elapsed());
+}
+
+fn decompress(filename: &str) -> impl BufRead {
+    let file = std::fs::File::open(filename).unwrap();
+    let progress_file = progress_reader::ProgressReader::new(file, std::fs::metadata(filename).unwrap().len());
+    let bfile = std::io::BufReader::new(progress_file);
+    let decomp = bzip2::read::MultiBzDecoder::new(bfile);
+    std::io::BufReader::new(decomp)
 }
 
 fn byte_to_quoted_string(bytes: &[u8]) -> String {
@@ -76,8 +79,8 @@ fn print_dict() {
     }
 }
 
-fn dictionary(bdecomp: impl BufRead) {
-    process_xml::ArticleReader::new(bdecomp)
+fn dictionary(filename: &str) {
+    process_xml::ArticleReader::new(decompress(filename))
         .filter_map(process_wikitext::strip_wikitext)
         .take(MAX_ARTICLES_TO_PROCESS)
         .flat_map(split_words::split_words)
@@ -86,10 +89,10 @@ fn dictionary(bdecomp: impl BufRead) {
         .write_to_file(DICTIONARY_FILENAME);
 }
 
-fn tokenize(bdecomp: impl BufRead) {
+fn tokenize(filename: &str) {
     let mut tokenizer = tokenize::Tokenizer::from_file(DICTIONARY_FILENAME);
 
-    let vector = process_xml::ArticleReader::new(bdecomp)
+    let vector = process_xml::ArticleReader::new(decompress(filename))
         .filter_map(process_wikitext::strip_wikitext)
         .take(MAX_ARTICLES_TO_PROCESS)
         .flat_map(split_words::split_words)

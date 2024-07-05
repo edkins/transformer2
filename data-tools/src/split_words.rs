@@ -9,6 +9,7 @@ use nom::{
 
 const MAX_WORD_LENGTH: usize = 24;
 
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct Word {
     length: usize,
     bytes: [u8; MAX_WORD_LENGTH],

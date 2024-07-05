@@ -1,4 +1,7 @@
 use std::collections::HashMap;
+use std::hash::Hash;
+
+use rayon::iter::{FromParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use crate::{
     bpe::{self, Bpe},
@@ -13,6 +16,12 @@ pub struct WordCounter {
 }
 
 impl WordCounter {
+    pub fn new_from_word_hashmap(words: HashMap<Word, u64>) -> Self {
+        WordCounter {
+            words: words.into_iter().map(|(word, count)| (word.as_bytes().to_vec(), count)).collect(),
+        }
+    }
+
     pub fn add_word(&mut self, word: Word) {
         self.add_word_bytes(word.as_bytes());
     }
@@ -71,4 +80,33 @@ impl FromIterator<Word> for WordCounter {
         }
         counter
     }
+}
+
+impl FromParallelIterator<Word> for WordCounter {
+    fn from_par_iter<I: IntoParallelIterator<Item = Word>>(iter: I) -> Self {
+        WordCounter::new_from_word_hashmap(count_distinct_parallel(iter.into_par_iter()))
+    }
+}
+
+fn count_distinct_parallel<K, I>(iter: I) -> HashMap<K, u64>
+where
+    K: Eq + Hash + Clone + Send + Sync,
+    I: ParallelIterator<Item = K>,
+{
+    iter.fold(
+        || HashMap::new(),
+        |mut acc, item| {
+            *acc.entry(item).or_insert(0) += 1;
+            acc
+        },
+    )
+    .reduce(
+        || HashMap::new(),
+        |mut a, b| {
+            for (k, v) in b {
+                *a.entry(k).or_insert(0) += v;
+            }
+            a
+        },
+    )
 }
