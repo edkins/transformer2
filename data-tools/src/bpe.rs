@@ -4,7 +4,7 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 
 type Token = u32;
 
-const NUM_TOKENS_TO_GENERATE: usize = 2000;
+const NUM_TOKENS_TO_GENERATE: usize = 65535;
 
 struct PairCounter(HashMap<(Token, Token), (u64, Vec<usize>)>);
 

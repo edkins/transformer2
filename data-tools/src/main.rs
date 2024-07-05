@@ -3,10 +3,12 @@ use std::str;
 
 use base64::{prelude::BASE64_STANDARD, Engine};
 use clap::{Parser, Subcommand};
+use parallel_xml::find_page_starts;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use word_counter::WordCounter;
 
 mod bpe;
-mod process_bz2;
+mod parallel_xml;
 mod process_wikitext;
 mod process_xml;
 mod progress_reader;
@@ -14,7 +16,7 @@ mod split_words;
 mod tokenize;
 mod word_counter;
 
-const MAX_ARTICLES_TO_PROCESS: usize = 5000;
+const MAX_ARTICLES_TO_PROCESS: usize = 50000;
 const DICTIONARY_FILENAME: &str = "dictionary.txt";
 const TOKENIZED_FILE: &str = "tokenized.bin";
 
@@ -46,7 +48,7 @@ fn main() {
         Command::Dictionary { filename } => dictionary(&filename),
         Command::Tokenize { filename } => tokenize(&filename),
         Command::Print{} => print_dict(),
-        Command::Split{ filename } => println!("{:?}", process_bz2::find_bz2_streams(&filename)),
+        Command::Split{ filename } => println!("{:?}", parallel_xml::find_page_starts(&filename)),
     }
 
     println!("Elapsed time: {:?}", time.elapsed());
@@ -80,10 +82,12 @@ fn print_dict() {
 }
 
 fn dictionary(filename: &str) {
-    process_xml::ArticleReader::new(decompress(filename))
+    find_page_starts(filename)
+        .par_iter()
+        .flat_map_iter(|section| process_xml::ArticleReader::new(section.buf_reader()))
         .filter_map(process_wikitext::strip_wikitext)
-        .take(MAX_ARTICLES_TO_PROCESS)
-        .flat_map(split_words::split_words)
+        .take_any(MAX_ARTICLES_TO_PROCESS)
+        .flat_map_iter(split_words::split_words)
         .collect::<WordCounter>()
         .into_bpe()
         .write_to_file(DICTIONARY_FILENAME);
