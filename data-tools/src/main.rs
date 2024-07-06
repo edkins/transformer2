@@ -16,7 +16,7 @@ mod split_words;
 mod tokenize;
 mod word_counter;
 
-const MAX_ARTICLES_TO_PROCESS: usize = 50000;
+const MAX_ARTICLES_TO_PROCESS: usize = 1000000;
 const DICTIONARY_FILENAME: &str = "dictionary.txt";
 const TOKENIZED_FILE: &str = "tokenized.bin";
 

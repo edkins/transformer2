@@ -1,16 +1,19 @@
-use std::{collections::HashMap, io::Write};
+use std::{collections::{BTreeSet, HashMap}, io::Write};
 
 use base64::{prelude::BASE64_STANDARD, Engine};
 
 type Token = u32;
 
-const NUM_TOKENS_TO_GENERATE: usize = 65535;
+const NUM_TOKENS_TO_GENERATE: usize = 16383;
 
-struct PairCounter(HashMap<(Token, Token), (u64, Vec<usize>)>);
+struct PairCounter{
+    map: HashMap<(Token, Token), (i64, Vec<usize>)>,
+    set: BTreeSet<(i64, (Token, Token))>,
+}
 
 impl PairCounter {
     fn new_from_words(words: &[(Vec<Token>, u64)]) -> Self {
-        let mut result = PairCounter(HashMap::new());
+        let mut result = PairCounter{map: HashMap::new(), set: BTreeSet::new()};
         for (i,(word, word_count)) in words.iter().enumerate() {
             result.add_token_pairs(word, *word_count, i);
         }
@@ -18,19 +21,36 @@ impl PairCounter {
     }
 
     fn find_most_common_pair(&self) -> Option<(Token, Token)> {
-        self.0.iter().max_by_key(|&(_, count)| count).map(|(&pair, _)| pair)
+        self.set.iter().next_back().map(|(_, k)| *k)
+    }
+
+    pub fn adjust(&mut self, t0: Token, t1: Token, word_id: usize, delta: i64) {
+        let key = (t0, t1);
+        let new_value = if let Some(value) = self.map.get(&key) {
+            self.set.remove(&(value.0, (t0, t1)));
+            value.0 + delta
+        } else {
+            delta
+        };
+
+        if new_value < 0 {
+            panic!("Negative pair count");
+        } else if new_value == 0 {
+            self.map.remove(&key);
+        } else {
+            let entry = self.map.entry(key).or_insert_with(|| (0, Vec::new()));
+            entry.0 += delta;
+            if entry.1.last() != Some(&word_id) {
+                entry.1.push(word_id);
+            }
+            self.set.insert((new_value, key));
+        }
     }
 
     fn add_token_pairs(&mut self, word: &[Token], word_count: u64, word_id: usize) {
         let mut prev = word[0];
         for &token in &word[1..] {
-            let pair = (prev, token);
-            let entry = self.0.entry(pair).or_insert_with(|| (0, Vec::new()));
-            entry.0 += word_count; // Note: if we see the same pair multiple times in the same word, we will count it multiple times
-            if entry.1.last() != Some(&word_id) {
-                entry.1.push(word_id);
-                //if !is_beginning {println!("Added pair: {:?}", pair);}
-            }
+            self.adjust(prev, token, word_id, word_count as i64);
             prev = token;
         }
     }
@@ -38,21 +58,13 @@ impl PairCounter {
     fn subtract_token_pairs(&mut self, word: &[Token], word_count: u64, _word_id: usize) {
         let mut prev = word[0];
         for &token in &word[1..] {
-            let pair = (prev, token);
-            let entry = self.0.get_mut(&pair).expect("Doesn't make sense for a pair from a word to be missing");
-            entry.0 = entry.0.checked_sub(word_count).expect("Subtracting word count isn't supposed to make it negative");
-            //entry.1.retain(|&x|x != word_id); // TODO: This is O(n) and could be improved
-            if entry.0 == 0 {
-                self.0.remove(&pair);
-                //println!("Removed pair: {:?}", pair);
-            }
+            self.adjust(prev, token, _word_id, -(word_count as i64));
             prev = token;
         }
     }
 
     fn get_words_containing_token_pair(&self, t0: Token, t1: Token) -> Vec<usize> {
-//        self.0.get(&(t0, t1)).map(|x|&x.1).into_iter().flatten().cloned()
-        if let Some(v) = self.0.get(&(t0, t1)) {
+        if let Some(v) = self.map.get(&(t0, t1)) {
             v.1.clone()
         } else {
             vec![]
@@ -93,17 +105,6 @@ impl Bpe {
                 // updated_count += 1;
             }
         }
-
-        // for i in 0..self.words.len() {
-        //     let (word, word_count) = &mut self.words[i];
-        //     if contains_pair(word, t0, t1) {
-        //         self.pairs.sub_token_pairs(word, *word_count, i);
-        //         substitute_pair(word, t0, t1, new_token);
-        //         self.pairs.add_token_pairs(word, *word_count, i);
-        //         // updated_count += 1;
-        //     }
-        // }
-        // println!("Token: {}. Updated {}/{} words", new_token, updated_count, self.words.len());
     }
 
     fn step(&mut self) -> bool {
@@ -132,10 +133,6 @@ impl Bpe {
         }
     }
 
-    // pub fn into_dictionary(self) -> Vec<Vec<u8>> {
-    //     self.token_vocab
-    // }
-
     pub fn write_to_file(&self, filename: &str) {
         let mut file = std::fs::File::create(filename).unwrap();
         for token in &self.token_vocab {
@@ -144,16 +141,6 @@ impl Bpe {
             file.write_all(b"\n").unwrap();
         }
     }
-
-    // pub fn get_token_counts(&self) -> Vec<u64> {
-    //     let mut result = vec![0; self.token_vocab.len()];
-    //     for (word, word_count) in &self.words {
-    //         for &token in word {
-    //             result[token as usize] += word_count;
-    //         }
-    //     }
-    //     result
-    // }
 }
 
 fn contains_pair(word: &[Token], t0: Token, t1: Token) -> bool {
