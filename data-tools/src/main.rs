@@ -4,21 +4,24 @@ use std::str;
 use base64::{prelude::BASE64_STANDARD, Engine};
 use byteorder::WriteBytesExt;
 use clap::{Parser, Subcommand};
-use parallel_xml::{find_all_page_starts, find_page_starts};
+use rand::seq::SliceRandom;
+use rand::Rng;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+
+use parallel_xml::{find_all_page_starts, read_page_starts};
+use progress_iter::ProgressIter;
 use word_counter::WordCounter;
 
 mod bpe;
 mod parallel_xml;
 mod process_wikitext;
 mod process_xml;
+mod progress_iter;
 mod progress_reader;
 mod split_words;
 mod tokenize;
 mod word_counter;
 
-const MAX_ARTICLES_TO_PROCESS: usize = 1000000;
-const DICTIONARY_FILENAME: &str = "dictionary.txt";
 const TOKENIZED_FILE: &str = "tokenized.bin";
 
 #[derive(Parser)]
@@ -31,27 +34,55 @@ struct Args {
 enum Command {
     Dictionary {
         filename: String,
+        #[clap(short = 's')]
+        split_filename: String,
+        #[clap(short = 'o')]
+        out_filename: String,
+        #[clap(short = 'n', default_value = "1000000")]
+        num_articles: usize,
     },
     Tokenize {
         filename: String,
+        #[clap(short = 'd')]
+        dict_filename: String,
     },
-    Print {},
+    Print {
+        dict_filename: String,
+    },
     Split {
         filename: String,
-        #[clap(short='o')]
+        #[clap(short = 'o')]
         out_filename: String,
-    }
+    },
 }
 
 fn main() {
     let cli = Args::parse();
     let time = std::time::Instant::now();
+    let mut rng = rand::thread_rng();
 
     match cli.subcmd {
-        Command::Dictionary { filename } => dictionary(&filename),
-        Command::Tokenize { filename } => tokenize(&filename),
-        Command::Print{} => print_dict(),
-        Command::Split{ filename, out_filename } => split_xml(&filename, &out_filename),
+        Command::Dictionary {
+            filename,
+            split_filename,
+            out_filename,
+            num_articles,
+        } => dictionary(
+            &mut rng,
+            &filename,
+            &split_filename,
+            &out_filename,
+            num_articles,
+        ),
+        Command::Tokenize {
+            filename,
+            dict_filename,
+        } => tokenize(&filename, &dict_filename),
+        Command::Print { dict_filename } => print_dict(&dict_filename),
+        Command::Split {
+            filename,
+            out_filename,
+        } => split_xml(&filename, &out_filename),
     }
 
     println!("Elapsed time: {:?}", time.elapsed());
@@ -68,7 +99,8 @@ fn split_xml(filename: &str, out_filename: &str) {
 
 fn decompress(filename: &str) -> impl BufRead {
     let file = std::fs::File::open(filename).unwrap();
-    let progress_file = progress_reader::ProgressReader::new(file, std::fs::metadata(filename).unwrap().len());
+    let progress_file =
+        progress_reader::ProgressReader::new(file, std::fs::metadata(filename).unwrap().len());
     let bfile = std::io::BufReader::new(progress_file);
     let decomp = bzip2::read::MultiBzDecoder::new(bfile);
     std::io::BufReader::new(decomp)
@@ -82,9 +114,9 @@ fn byte_to_quoted_string(bytes: &[u8]) -> String {
     }
 }
 
-fn print_dict() {
-    let dictionary = std::fs::File::open(DICTIONARY_FILENAME).unwrap();
-    for (i,token) in BufReader::new(dictionary)
+fn print_dict(dict_filename: &str) {
+    let dictionary = std::fs::File::open(dict_filename).unwrap();
+    for (i, token) in BufReader::new(dictionary)
         .lines()
         .map(|line| BASE64_STANDARD.decode(line.unwrap()).unwrap())
         .enumerate()
@@ -93,24 +125,34 @@ fn print_dict() {
     }
 }
 
-fn dictionary(filename: &str) {
-    find_page_starts(filename)
+fn dictionary(
+    rng: &mut impl Rng,
+    filename: &str,
+    split_filename: &str,
+    out_filename: &str,
+    num_articles: usize,
+) {
+    let articles = read_page_starts(filename, split_filename);
+    articles
+        .choose_multiple(rng, articles.len()) // choose extra because some will be redirects and hence discarded
+        .cloned()
+        .collect::<Vec<_>>()
         .par_iter()
         .flat_map_iter(|section| process_xml::ArticleReader::new(section.buf_reader()))
         .filter_map(process_wikitext::strip_wikitext)
-        .take_any(MAX_ARTICLES_TO_PROCESS)
+        .take_any(num_articles)
+        .show_progress(num_articles as u64)
         .flat_map_iter(split_words::split_words)
         .collect::<WordCounter>()
         .into_bpe()
-        .write_to_file(DICTIONARY_FILENAME);
+        .write_to_file(out_filename);
 }
 
-fn tokenize(filename: &str) {
-    let mut tokenizer = tokenize::Tokenizer::from_file(DICTIONARY_FILENAME);
+fn tokenize(filename: &str, dict_filename: &str) {
+    let mut tokenizer = tokenize::Tokenizer::from_file(dict_filename);
 
     let vector = process_xml::ArticleReader::new(decompress(filename))
         .filter_map(process_wikitext::strip_wikitext)
-        .take(MAX_ARTICLES_TO_PROCESS)
         .flat_map(split_words::split_words)
         .flat_map(|word| tokenizer.tokenize_word_to_bytes(word).to_vec())
         .collect::<Vec<_>>();

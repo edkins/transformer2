@@ -18,7 +18,10 @@ pub struct WordCounter {
 impl WordCounter {
     pub fn new_from_word_hashmap(words: HashMap<Word, u64>) -> Self {
         WordCounter {
-            words: words.into_iter().map(|(word, count)| (word.as_bytes().to_vec(), count)).collect(),
+            words: words
+                .into_iter()
+                .map(|(word, count)| (word.as_bytes().to_vec(), count))
+                .collect(),
         }
     }
 

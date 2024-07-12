@@ -1,4 +1,7 @@
-use std::{collections::HashMap, io::{BufRead, BufReader}};
+use std::{
+    collections::HashMap,
+    io::{BufRead, BufReader},
+};
 
 use base64::{prelude::BASE64_STANDARD, Engine};
 
@@ -63,10 +66,7 @@ impl Tokenizer {
 
     pub fn tokenize_word_to_bytes(&mut self, word: Word) -> Vec<u8> {
         let tokens = self.tokenize_word(word);
-        tokens
-            .iter()
-            .flat_map(|x|x.to_le_bytes())
-            .collect()
+        tokens.iter().flat_map(|x| x.to_le_bytes()).collect()
     }
 
     pub fn tokenize_word(&mut self, word: Word) -> &[Token] {

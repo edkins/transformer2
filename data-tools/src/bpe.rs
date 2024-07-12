@@ -1,4 +1,7 @@
-use std::{collections::{BTreeSet, HashMap}, io::Write};
+use std::{
+    collections::{BTreeSet, HashMap},
+    io::Write,
+};
 
 use base64::{prelude::BASE64_STANDARD, Engine};
 
@@ -6,15 +9,18 @@ type Token = u32;
 
 const NUM_TOKENS_TO_GENERATE: usize = 16383;
 
-struct PairCounter{
+struct PairCounter {
     map: HashMap<(Token, Token), (i64, Vec<usize>)>,
     set: BTreeSet<(i64, (Token, Token))>,
 }
 
 impl PairCounter {
     fn new_from_words(words: &[(Vec<Token>, u64)]) -> Self {
-        let mut result = PairCounter{map: HashMap::new(), set: BTreeSet::new()};
-        for (i,(word, word_count)) in words.iter().enumerate() {
+        let mut result = PairCounter {
+            map: HashMap::new(),
+            set: BTreeSet::new(),
+        };
+        for (i, (word, word_count)) in words.iter().enumerate() {
             result.add_token_pairs(word, *word_count, i);
         }
         result
@@ -54,7 +60,7 @@ impl PairCounter {
             prev = token;
         }
     }
-    
+
     fn subtract_token_pairs(&mut self, word: &[Token], word_count: u64, _word_id: usize) {
         let mut prev = word[0];
         for &token in &word[1..] {
