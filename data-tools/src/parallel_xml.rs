@@ -1,5 +1,7 @@
 use std::io::{BufRead, BufReader, Read, Seek};
 
+use crate::progress_reader::ProgressReader;
+
 #[derive(Clone, Debug)]
 pub struct FileSection {
     pub filename: String,
@@ -18,6 +20,25 @@ impl FileSection {
 const SKIP_SIZE:u64 = 512 * 1024 * 1024;
 const BUFFER_SIZE:usize = 1024 * 1024;
 const NEEDLE: &[u8] = b"\n  <page>\n";
+
+pub fn find_all_page_starts(filename: &str) -> Vec<u64> {
+    let mut page_starts = Vec::new();
+    let size = std::fs::metadata(filename).expect("Error getting file metadata").len();
+    let file = std::fs::File::open(filename).expect("Error opening file");
+    let progress_reader = ProgressReader::new(file, size);
+    let buf_reader = BufReader::new(progress_reader);
+    let mut pos = 0;
+    for line in buf_reader.lines() {
+        let line = line.expect("Error reading line");
+        if line == "  <page>" {
+            page_starts.push(pos);
+        }
+        pos += line.len() as u64 + 1;
+    }
+    assert_eq!(pos, size);
+    page_starts.push(pos);
+    page_starts
+}
 
 pub fn find_page_starts(filename: &str) -> Vec<FileSection> {
     let mut page_starts = Vec::new();

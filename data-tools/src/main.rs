@@ -2,8 +2,9 @@ use std::io::{BufRead, BufReader, Write};
 use std::str;
 
 use base64::{prelude::BASE64_STANDARD, Engine};
+use byteorder::WriteBytesExt;
 use clap::{Parser, Subcommand};
-use parallel_xml::find_page_starts;
+use parallel_xml::{find_all_page_starts, find_page_starts};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use word_counter::WordCounter;
 
@@ -37,6 +38,8 @@ enum Command {
     Print {},
     Split {
         filename: String,
+        #[clap(short='o')]
+        out_filename: String,
     }
 }
 
@@ -48,10 +51,19 @@ fn main() {
         Command::Dictionary { filename } => dictionary(&filename),
         Command::Tokenize { filename } => tokenize(&filename),
         Command::Print{} => print_dict(),
-        Command::Split{ filename } => println!("{:?}", parallel_xml::find_page_starts(&filename)),
+        Command::Split{ filename, out_filename } => split_xml(&filename, &out_filename),
     }
 
     println!("Elapsed time: {:?}", time.elapsed());
+}
+
+fn split_xml(filename: &str, out_filename: &str) {
+    let data = find_all_page_starts(filename);
+    let out_file = std::fs::File::create(out_filename).unwrap();
+    let mut out_buf = std::io::BufWriter::new(out_file);
+    for num in &data {
+        out_buf.write_u64::<byteorder::LittleEndian>(*num).unwrap();
+    }
 }
 
 fn decompress(filename: &str) -> impl BufRead {

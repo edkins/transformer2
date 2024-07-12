@@ -1,5 +1,5 @@
 /target/
-/dictionary.txt
+/dictionary*.txt
 /tokenized.bin
 /perf.data
 /perf.data.old
