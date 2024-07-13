@@ -48,6 +48,8 @@ enum Command {
         dict_filename: String,
         #[clap(short = 'o')]
         out_filename: String,
+        #[clap(short = 'p', default_value = "8")]
+        parallelism: usize,
     },
     Print {
         dict_filename: String,
@@ -81,10 +83,12 @@ fn main() {
             filename,
             dict_filename,
             out_filename,
+            parallelism,
         } => tokenize(
             &filename,
             &dict_filename,
             &out_filename,
+            parallelism,
         ),
         Command::Print { dict_filename } => print_dict(&dict_filename),
         Command::Split {
@@ -150,27 +154,35 @@ fn tokenize(
     filename: &str,
     dict_filename: &str,
     out_filename: &str,
+    parallelism: usize,
 ) {
+    let sections = find_page_starts(filename);
     let out_file = Mutex::new(std::fs::File::create(out_filename).unwrap());
-    find_page_starts(filename)
-        .par_iter()
-        .flat_map_iter(|section| process_xml::ArticleReader::new(section.buf_reader()))
-        .show_progress(24000000) // TODO: how to estimate article count for progress bar?
-        .filter_map(process_wikitext::strip_wikitext)
-        .map(|text| {
-            TOKENIZER.with(|tokenizer| {
-                let mut tokenizer = tokenizer.borrow_mut();
-                split_words::split_words(text)
-                    .flat_map(|word| {
-                        tokenizer
-                            .initialize_and_tokenize(dict_filename, word)
-                            .to_vec()
-                    })
-                    .chain(std::iter::once(0))
-                    .collect::<Vec<_>>()
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(parallelism)
+        .build()
+        .expect("Unable to create thread pool");
+    pool.install(move || {
+        sections
+            .par_iter()
+            .flat_map_iter(|section| process_xml::ArticleReader::new(section.buf_reader()))
+            .show_progress(24000000) // TODO: how to estimate article count for progress bar?
+            .filter_map(process_wikitext::strip_wikitext)
+            .map(|text| {
+                TOKENIZER.with(|tokenizer| {
+                    let mut tokenizer = tokenizer.borrow_mut();
+                    split_words::split_words(text)
+                        .flat_map(|word| {
+                            tokenizer
+                                .initialize_and_tokenize(dict_filename, word)
+                                .to_vec()
+                        })
+                        .chain(std::iter::once(0))
+                        .collect::<Vec<_>>()
+                })
             })
-        })
-        .for_each(|vec| {
-            vec.write_little_endian(&*out_file.lock().expect("Poisoned."));
-        });
+            .for_each(|vec| {
+                vec.write_little_endian(&*out_file.lock().expect("Poisoned."));
+            })
+    });
 }
