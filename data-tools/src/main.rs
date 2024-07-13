@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, BufWriter};
 use std::str;
 use std::sync::Mutex;
 
@@ -7,10 +7,10 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 use clap::{Parser, Subcommand};
 use rand::seq::SliceRandom;
 use rand::Rng;
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IntoParallelRefIterator, ParallelBridge, ParallelIterator};
 
 use little_endian::LittleEndianStruct;
-use parallel_xml::{find_all_page_starts, find_page_starts, read_page_starts};
+use parallel_xml::{find_all_page_starts, read_page_starts};
 use progress_iter::ParallelProgressIter;
 use word_counter::WordCounter;
 
@@ -103,7 +103,8 @@ fn main() {
 fn split_xml(filename: &str, out_filename: &str) {
     let data = find_all_page_starts(filename);
     let out_file = std::fs::File::create(out_filename).unwrap();
-    data.write_little_endian(out_file);
+    let mut out_buf = BufWriter::new(out_file);
+    data.write_little_endian(&mut out_buf);
 }
 
 fn byte_to_quoted_string(bytes: &[u8]) -> String {
@@ -156,17 +157,19 @@ fn tokenize(
     out_filename: &str,
     parallelism: usize,
 ) {
-    let sections = find_page_starts(filename);
-    let out_file = Mutex::new(std::fs::File::create(out_filename).unwrap());
+    let length = std::fs::metadata(filename).expect("Failed to get metadata").len();
+    let in_file = std::fs::File::open(filename).expect("Failed to open file");
+    let in_file = progress_reader::ProgressReader::new(in_file, length);
+    let in_file = BufReader::new(in_file);
+    let out_file = Mutex::new(BufWriter::new(std::fs::File::create(out_filename).unwrap()));
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(parallelism)
         .build()
         .expect("Unable to create thread pool");
     pool.install(move || {
-        sections
-            .par_iter()
-            .flat_map_iter(|section| process_xml::ArticleReader::new(section.buf_reader()))
-            .show_progress(24000000) // TODO: how to estimate article count for progress bar?
+        process_xml::ArticleReader::new(in_file)
+            .par_bridge()
+            //.show_progress(24000000) // TODO: how to estimate article count for progress bar?
             .filter_map(process_wikitext::strip_wikitext)
             .map(|text| {
                 TOKENIZER.with(|tokenizer| {
@@ -182,7 +185,7 @@ fn tokenize(
                 })
             })
             .for_each(|vec| {
-                vec.write_little_endian(&*out_file.lock().expect("Poisoned."));
+                vec.write_little_endian(&mut*out_file.lock().expect("Poisoned."));
             })
     });
 }
