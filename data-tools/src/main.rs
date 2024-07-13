@@ -10,7 +10,7 @@ use rand::Rng;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 use little_endian::LittleEndianStruct;
-use parallel_xml::{find_all_page_starts, read_page_starts};
+use parallel_xml::{find_all_page_starts, find_page_starts, read_page_starts};
 use progress_iter::ParallelProgressIter;
 use word_counter::WordCounter;
 
@@ -44,14 +44,10 @@ enum Command {
     },
     Tokenize {
         filename: String,
-        #[clap(short = 's')]
-        split_filename: String,
         #[clap(short = 'd')]
         dict_filename: String,
         #[clap(short = 'o')]
         out_filename: String,
-        #[clap(short = 'p', default_value = "16")]
-        parallelism: usize,
     },
     Print {
         dict_filename: String,
@@ -83,17 +79,12 @@ fn main() {
         ),
         Command::Tokenize {
             filename,
-            split_filename,
             dict_filename,
             out_filename,
-            parallelism,
         } => tokenize(
-            &mut rng,
             &filename,
-            &split_filename,
             &dict_filename,
             &out_filename,
-            parallelism,
         ),
         Command::Print { dict_filename } => print_dict(&dict_filename),
         Command::Split {
@@ -156,41 +147,30 @@ fn dictionary(
 thread_local! {static TOKENIZER: RefCell<tokenize::Tokenizer> = RefCell::new(tokenize::Tokenizer::default())}
 
 fn tokenize(
-    rng: &mut impl Rng,
     filename: &str,
-    split_filename: &str,
     dict_filename: &str,
     out_filename: &str,
-    parallelism: usize,
 ) {
-    let mut articles = read_page_starts(filename, split_filename);
     let out_file = Mutex::new(std::fs::File::create(out_filename).unwrap());
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(parallelism)
-        .build()
-        .expect("Unable to create thread pool");
-    articles.shuffle(rng);
-    pool.install(move || {
-        articles
-            .par_iter()
-            .show_progress(articles.len() as u64)
-            .flat_map_iter(|section| process_xml::ArticleReader::new(section.buf_reader()))
-            .filter_map(process_wikitext::strip_wikitext)
-            .map(|text| {
-                TOKENIZER.with(|tokenizer| {
-                    let mut tokenizer = tokenizer.borrow_mut();
-                    split_words::split_words(text)
-                        .flat_map(|word| {
-                            tokenizer
-                                .initialize_and_tokenize(dict_filename, word)
-                                .to_vec()
-                        })
-                        .chain(std::iter::once(0))
-                        .collect::<Vec<_>>()
-                })
+    find_page_starts(filename)
+        .par_iter()
+        .flat_map_iter(|section| process_xml::ArticleReader::new(section.buf_reader()))
+        .show_progress(24000000) // TODO: how to estimate article count for progress bar?
+        .filter_map(process_wikitext::strip_wikitext)
+        .map(|text| {
+            TOKENIZER.with(|tokenizer| {
+                let mut tokenizer = tokenizer.borrow_mut();
+                split_words::split_words(text)
+                    .flat_map(|word| {
+                        tokenizer
+                            .initialize_and_tokenize(dict_filename, word)
+                            .to_vec()
+                    })
+                    .chain(std::iter::once(0))
+                    .collect::<Vec<_>>()
             })
-            .for_each(|vec| {
-                vec.write_little_endian(&*out_file.lock().expect("Poisoned."));
-            })
-    });
+        })
+        .for_each(|vec| {
+            vec.write_little_endian(&*out_file.lock().expect("Poisoned."));
+        });
 }
