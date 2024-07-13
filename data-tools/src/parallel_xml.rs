@@ -12,11 +12,15 @@ pub struct FileSection {
 }
 
 impl FileSection {
-    pub fn buf_reader(&self) -> impl BufRead {
+    pub fn reader(&self) -> impl Read {
         let mut file = std::fs::File::open(&self.filename).expect("Error opening file");
         file.seek(std::io::SeekFrom::Start(self.start))
             .expect("Error seeking file");
-        BufReader::new(file.take(self.end - self.start))
+        file.take(self.end - self.start)
+    }
+
+    pub fn buf_reader(&self) -> impl BufRead {
+        BufReader::new(self.reader())
     }
 }
 

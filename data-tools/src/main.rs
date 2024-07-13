@@ -1,18 +1,21 @@
-use std::io::{BufRead, BufReader, Write};
+use std::cell::RefCell;
+use std::io::{BufRead, BufReader};
 use std::str;
+use std::sync::Mutex;
 
 use base64::{prelude::BASE64_STANDARD, Engine};
-use byteorder::WriteBytesExt;
 use clap::{Parser, Subcommand};
 use rand::seq::SliceRandom;
 use rand::Rng;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
+use little_endian::LittleEndianStruct;
 use parallel_xml::{find_all_page_starts, read_page_starts};
-use progress_iter::ProgressIter;
+use progress_iter::ParallelProgressIter;
 use word_counter::WordCounter;
 
 mod bpe;
+mod little_endian;
 mod parallel_xml;
 mod process_wikitext;
 mod process_xml;
@@ -21,8 +24,6 @@ mod progress_reader;
 mod split_words;
 mod tokenize;
 mod word_counter;
-
-const TOKENIZED_FILE: &str = "tokenized.bin";
 
 #[derive(Parser)]
 struct Args {
@@ -43,8 +44,14 @@ enum Command {
     },
     Tokenize {
         filename: String,
+        #[clap(short = 's')]
+        split_filename: String,
         #[clap(short = 'd')]
         dict_filename: String,
+        #[clap(short = 'o')]
+        out_filename: String,
+        #[clap(short = 'p', default_value = "16")]
+        parallelism: usize,
     },
     Print {
         dict_filename: String,
@@ -76,8 +83,18 @@ fn main() {
         ),
         Command::Tokenize {
             filename,
+            split_filename,
             dict_filename,
-        } => tokenize(&filename, &dict_filename),
+            out_filename,
+            parallelism,
+        } => tokenize(
+            &mut rng,
+            &filename,
+            &split_filename,
+            &dict_filename,
+            &out_filename,
+            parallelism,
+        ),
         Command::Print { dict_filename } => print_dict(&dict_filename),
         Command::Split {
             filename,
@@ -91,19 +108,7 @@ fn main() {
 fn split_xml(filename: &str, out_filename: &str) {
     let data = find_all_page_starts(filename);
     let out_file = std::fs::File::create(out_filename).unwrap();
-    let mut out_buf = std::io::BufWriter::new(out_file);
-    for num in &data {
-        out_buf.write_u64::<byteorder::LittleEndian>(*num).unwrap();
-    }
-}
-
-fn decompress(filename: &str) -> impl BufRead {
-    let file = std::fs::File::open(filename).unwrap();
-    let progress_file =
-        progress_reader::ProgressReader::new(file, std::fs::metadata(filename).unwrap().len());
-    let bfile = std::io::BufReader::new(progress_file);
-    let decomp = bzip2::read::MultiBzDecoder::new(bfile);
-    std::io::BufReader::new(decomp)
+    data.write_little_endian(out_file);
 }
 
 fn byte_to_quoted_string(bytes: &[u8]) -> String {
@@ -148,17 +153,44 @@ fn dictionary(
         .write_to_file(out_filename);
 }
 
-fn tokenize(filename: &str, dict_filename: &str) {
-    let mut tokenizer = tokenize::Tokenizer::from_file(dict_filename);
+thread_local! {static TOKENIZER: RefCell<tokenize::Tokenizer> = RefCell::new(tokenize::Tokenizer::default())}
 
-    let vector = process_xml::ArticleReader::new(decompress(filename))
-        .filter_map(process_wikitext::strip_wikitext)
-        .flat_map(split_words::split_words)
-        .flat_map(|word| tokenizer.tokenize_word_to_bytes(word).to_vec())
-        .collect::<Vec<_>>();
-
-    println!("Tokenized {} bytes", vector.len());
-
-    let mut file = std::fs::File::create(TOKENIZED_FILE).unwrap();
-    file.write_all(&vector).unwrap();
+fn tokenize(
+    rng: &mut impl Rng,
+    filename: &str,
+    split_filename: &str,
+    dict_filename: &str,
+    out_filename: &str,
+    parallelism: usize,
+) {
+    let mut articles = read_page_starts(filename, split_filename);
+    let out_file = Mutex::new(std::fs::File::create(out_filename).unwrap());
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(parallelism)
+        .build()
+        .expect("Unable to create thread pool");
+    articles.shuffle(rng);
+    pool.install(move || {
+        articles
+            .par_iter()
+            .show_progress(articles.len() as u64)
+            .flat_map_iter(|section| process_xml::ArticleReader::new(section.buf_reader()))
+            .filter_map(process_wikitext::strip_wikitext)
+            .map(|text| {
+                TOKENIZER.with(|tokenizer| {
+                    let mut tokenizer = tokenizer.borrow_mut();
+                    split_words::split_words(text)
+                        .flat_map(|word| {
+                            tokenizer
+                                .initialize_and_tokenize(dict_filename, word)
+                                .to_vec()
+                        })
+                        .chain(std::iter::once(0))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .for_each(|vec| {
+                vec.write_little_endian(&*out_file.lock().expect("Poisoned."));
+            })
+    });
 }

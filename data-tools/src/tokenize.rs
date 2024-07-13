@@ -9,26 +9,21 @@ use crate::split_words::Word;
 
 pub type Token = u16;
 
+#[derive(Default)]
 pub struct Tokenizer {
     cache: HashMap<Vec<u8>, Vec<Token>>,
 }
 
 impl Tokenizer {
-    pub fn from_file(filename: &str) -> Self {
+    pub fn initialize(&mut self, filename: &str) {
         let dictionary = std::fs::File::open(filename).unwrap();
-        let dictionary = BufReader::new(dictionary)
+        for (i, word) in BufReader::new(dictionary)
             .lines()
             .map(|line| BASE64_STANDARD.decode(line.unwrap()).unwrap())
-            .collect();
-        Tokenizer::new(dictionary)
-    }
-
-    pub fn new(dictionary: Vec<Vec<u8>>) -> Self {
-        let mut cache = HashMap::new();
-        for (i, word) in dictionary.into_iter().enumerate() {
-            cache.insert(word.clone(), vec![i as Token]);
+            .enumerate()
+        {
+            self.cache.insert(word.clone(), vec![(i + 1) as Token]);
         }
-        Tokenizer { cache }
     }
 
     fn single_token(&self, text: &[u8]) -> Option<Token> {
@@ -64,9 +59,11 @@ impl Tokenizer {
         tokens
     }
 
-    pub fn tokenize_word_to_bytes(&mut self, word: Word) -> Vec<u8> {
-        let tokens = self.tokenize_word(word);
-        tokens.iter().flat_map(|x| x.to_le_bytes()).collect()
+    pub fn initialize_and_tokenize(&mut self, filename: &str, word: Word) -> &[Token] {
+        if self.cache.is_empty() {
+            self.initialize(filename);
+        }
+        self.tokenize_word(word)
     }
 
     pub fn tokenize_word(&mut self, word: Word) -> &[Token] {
