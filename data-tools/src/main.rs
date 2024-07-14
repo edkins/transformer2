@@ -116,7 +116,7 @@ fn print_dict(dict_filename: &str) {
         .map(|line| BASE64_STANDARD.decode(line.unwrap()).unwrap())
         .enumerate()
     {
-        println!("{} {}", i, byte_to_quoted_string(&token));
+        println!("{} {}", i + 1, byte_to_quoted_string(&token));
     }
 }
 
