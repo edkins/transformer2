@@ -160,9 +160,6 @@ fn item(i: &str) -> IResult<&str, &str> {
 }
 
 pub fn strip_wikitext(input: String) -> String {
-    if input.starts_with("#REDIRECT ") {
-        panic!("Not expecting redirect for {}", input);
-    }
     let mut result = String::new();
     if let Ok((_, items)) = many0(item)(&input) {
         for item in &items {
