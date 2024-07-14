@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::str;
 use std::sync::Mutex;
@@ -9,8 +10,10 @@ use clap::{Parser, Subcommand};
 use process_xml::Article;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 
-use tokenize::TokenizerOutput;
+use serde::Deserialize;
+use tokenize::{ArticleMetadata, TokenizerOutput};
 use word_counter::WordCounter;
+use little_endian::LittleEndianStruct;
 
 mod bpe;
 mod little_endian;
@@ -52,6 +55,9 @@ enum Command {
         #[clap(short = 'd')]
         dict_filename: String,
     },
+    Condense {
+        filename: String,
+    },
 }
 
 fn main() {
@@ -73,16 +79,43 @@ fn main() {
         Command::Cat {
             filename,
             dict_filename,
-        } => {
-            cat(&filename, &dict_filename);
-        }
+        } => cat(&filename, &dict_filename),
+        Command::Condense { filename } => condense(&filename),
     }
 
     println!("Elapsed time: {:?}", time.elapsed());
 }
 
+#[derive(Deserialize)]
+struct AllMetadataIn {
+    train: Vec<ArticleMetadata>,
+    validation: Vec<ArticleMetadata>,
+    test: Vec<ArticleMetadata>,
+}
+
+fn write_condensed(metadata: &[ArticleMetadata], filename: &str) {
+    let mut nums = vec![];
+    for metadata in metadata {
+        if metadata.url.starts_with("https://en.wikipedia.org/wiki/Wikipedia%3A") {
+            continue;
+        }
+        nums.push(metadata.token_start);
+        nums.push(metadata.token_end);
+    }
+    let mut file = BufWriter::new(File::create(filename).unwrap());
+    nums.write_little_endian(&mut file);
+}
+
+fn condense(filename: &str) {
+    let metadata = File::open(format!("{}.metadata", filename)).unwrap();
+    let metadata: AllMetadataIn = serde_json::from_reader(BufReader::new(metadata)).unwrap();
+    write_condensed(&metadata.train, &format!("{}.metadata.train", filename));
+    write_condensed(&metadata.validation, &format!("{}.metadata.validation", filename));
+    write_condensed(&metadata.test, &format!("{}.metadata.test", filename));
+}
+
 fn cat(filename: &str, dict_filename: &str) {
-    let dictionary = std::fs::File::open(dict_filename).unwrap();
+    let dictionary = File::open(dict_filename).unwrap();
     let dictionary = BufReader::new(dictionary);
     let dictionary = std::iter::once(b"[--SEP--]".to_vec())
         .chain(
@@ -91,7 +124,7 @@ fn cat(filename: &str, dict_filename: &str) {
                 .map(|line| BASE64_STANDARD.decode(line.unwrap()).unwrap()),
         )
         .collect::<Vec<_>>();
-    let in_file = std::fs::File::open(filename).unwrap();
+    let in_file = File::open(filename).unwrap();
     let mut in_file = BufReader::new(in_file);
     let mut out_file = BufWriter::new(std::io::stdout());
     while let Ok(tok) = in_file.read_u16::<byteorder::LittleEndian>() {
@@ -110,7 +143,7 @@ fn byte_to_quoted_string(bytes: &[u8]) -> String {
 }
 
 fn print_dict(dict_filename: &str) {
-    let dictionary = std::fs::File::open(dict_filename).unwrap();
+    let dictionary = File::open(dict_filename).unwrap();
     for (i, token) in BufReader::new(dictionary)
         .lines()
         .map(|line| BASE64_STANDARD.decode(line.unwrap()).unwrap())
@@ -136,11 +169,11 @@ thread_local! {static TOKENIZER: RefCell<tokenize::Tokenizer> = RefCell::new(tok
 
 fn progress_read_input(
     filename: &str,
-) -> BufReader<progress_reader::ProgressReader<std::fs::File>> {
+) -> BufReader<progress_reader::ProgressReader<File>> {
     let length = std::fs::metadata(filename)
         .expect("Failed to get metadata")
         .len();
-    let file = std::fs::File::open(filename).expect("Failed to open file");
+    let file = File::open(filename).expect("Failed to open file");
     let file = progress_reader::ProgressReader::new(file, length);
     BufReader::new(file)
 }

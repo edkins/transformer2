@@ -5,7 +5,7 @@ use std::{
 };
 
 use base64::{prelude::BASE64_STANDARD, Engine};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::little_endian::LittleEndianStruct;
 use crate::{
@@ -107,8 +107,8 @@ impl Tokenizer {
     }
 }
 
-#[derive(Serialize)]
-struct ArticleMetadata {
+#[derive(Serialize, Deserialize)]
+pub struct ArticleMetadata {
     pub url: String,
     pub token_start: u64,
     pub token_end: u64,

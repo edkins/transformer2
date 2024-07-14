@@ -1,25 +1,22 @@
 import argparse
 import base64
-import json
-import random
-import struct
 import torch
 from typing import Literal
 
 class DataSlurper:
-    def __init__(self, filename_base: str, device: str):
-        self.files = {
-            'train': open(f'{filename_base}.train','rb'),
-            'validation': open(f'{filename_base}.validation','rb'),
-        }
-        with open(f'{filename_base}.metadata') as f:
-            self.metadata = json.load(f)
+    def __init__(self, filename_base: str, split: Literal['train','validation','test'], device: str):
+        self.split = split
+        self.file = open(f'{filename_base}.{split}','rb')
+        with open(f'{filename_base}.metadata.{split}','rb') as f:
+            buffer = f.read()
+            self.metadata = torch.frombuffer(buffer, dtype=torch.int64).reshape(-1,2)
         self.device = device
 
-    def _pick_articles(self, split: Literal['train','validation'], n: int) -> list:
-        return random.sample(self.metadata[split], n)
+    def _pick_articles(self, n: int) -> torch.Tensor:
+        indices = torch.randint(0, len(self.metadata), (n,))
+        return self.metadata[indices]
 
-    def batch(self, split: Literal['train','validation'], n: int, length: int) -> tuple[torch.Tensor, torch.Tensor]:
+    def batch(self, n: int, length: int) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Returns a uint16 tensor of shape (n, length) containing the first `length` tokens of `n` random articles from the specified split.
         Each row will start with a zero byte which is the beginning-of-sequence token.
@@ -28,15 +25,13 @@ class DataSlurper:
         (It may be padded with zeros in the case that the end of the article is reached).
         """
         byte_length = 2 * (length - 1)
-        articles = self._pick_articles(split, n)
+        articles = self._pick_articles(n)
         result = torch.zeros((n, length), dtype=torch.uint16)
         result_mask = torch.zeros((n, length), dtype=bool)
-        for i,article in enumerate(articles):
-            f = self.files[split]
-            start = article['token_start']
-            end = min(article['token_end'], start + byte_length)
-            f.seek(start)
-            read_bytes = f.read(end-start)
+        for i,[start,token_end] in enumerate(articles):
+            end = min(token_end, start + byte_length)
+            self.file.seek(start)
+            read_bytes = self.file.read(end-start)
             read_tensor = torch.frombuffer(read_bytes, dtype=torch.int16)
             result[i,1:1+len(read_tensor)] = read_tensor
             result_mask[i,:1+len(read_tensor)] = True
@@ -44,7 +39,7 @@ class DataSlurper:
 
 class Tokenizer:
     def __init__(self, dict_filename: str):
-        self.tokens = [b'[--SEP--]']
+        self.tokens = [b'$']    # start/end of document marker. Not an actual dollar sign.
         with open(dict_filename) as f:
             for line in f:
                 self.tokens.append(base64.b64decode(line.strip()))
@@ -82,12 +77,11 @@ class TransformerModel(torch.nn.Module):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('input_file', type=str)
-    parser.add_argument('-d', type=str, required=True)
     args = parser.parse_args()
     input_filename = args.input_file
-    dict_filename = args.d
+    dict_filename = f'{input_filename}.dictionary'
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    slurper = DataSlurper(input_filename, device)
+    slurper = DataSlurper(input_filename, 'train', device)
     tokenizer = Tokenizer(dict_filename)
     
     n_batch = 64
@@ -98,9 +92,10 @@ def main():
 
     model = TransformerModel(2, 8, len(tokenizer.tokens), d_model, d_k, d_hidden).to(device)
 
-    batch, mask = slurper.batch('train', n_batch, n_context)
+    batch, mask = slurper.batch(n_batch, n_context)
     for row in batch:
         print(tokenizer.decode(row))
+        print('--------')
 
     model(batch)
 

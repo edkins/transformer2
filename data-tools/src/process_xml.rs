@@ -54,8 +54,8 @@ impl<R: BufRead> Iterator for ArticleReader<R> {
                 Ok(Event::End(e)) => {
                     match e.local_name().into_inner() {
                         b"text" => {
-                            if redirect {
-                                // don't return articles if they're redirects
+                            if redirect || title.starts_with("Wikipedia:") {
+                                // don't return articles if they're redirects or Wikipedia project pages
                                 in_text = false;
                                 in_title = false;
                                 text = String::new();
