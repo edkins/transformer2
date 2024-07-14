@@ -1,9 +1,10 @@
 use std::cell::RefCell;
-use std::io::{BufRead, BufReader, BufWriter};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::str;
 use std::sync::Mutex;
 
 use base64::{prelude::BASE64_STANDARD, Engine};
+use byteorder::ReadBytesExt;
 use clap::{Parser, Subcommand};
 use rand::seq::SliceRandom;
 use rand::Rng;
@@ -59,6 +60,11 @@ enum Command {
         #[clap(short = 'o')]
         out_filename: String,
     },
+    Cat {
+        filename: String,
+        #[clap(short = 'd')]
+        dict_filename: String,
+    }
 }
 
 fn main() {
@@ -95,9 +101,28 @@ fn main() {
             filename,
             out_filename,
         } => split_xml(&filename, &out_filename),
+        Command::Cat {
+            filename,
+            dict_filename,
+        } => {
+            cat(&filename, &dict_filename);
+        }
     }
 
     println!("Elapsed time: {:?}", time.elapsed());
+}
+
+fn cat(filename: &str, dict_filename: &str) {
+    let dictionary = std::fs::File::open(dict_filename).unwrap();
+    let dictionary = BufReader::new(dictionary);
+    let dictionary = 
+        std::iter::once(b"[--SEP--]".to_vec()).chain(dictionary.lines().map(|line| BASE64_STANDARD.decode(line.unwrap()).unwrap())).collect::<Vec<_>>();
+    let in_file = std::fs::File::open(filename).unwrap();
+    let mut in_file = BufReader::new(in_file);
+    let mut out_file = BufWriter::new(std::io::stdout());
+    while let Ok(tok) = in_file.read_u16::<byteorder::LittleEndian>() {
+        out_file.write(&dictionary[tok as usize]).expect("Failed to write to stdout");
+    }
 }
 
 fn split_xml(filename: &str, out_filename: &str) {
@@ -169,7 +194,6 @@ fn tokenize(
     pool.install(move || {
         process_xml::ArticleReader::new(in_file)
             .par_bridge()
-            //.show_progress(24000000) // TODO: how to estimate article count for progress bar?
             .filter_map(process_wikitext::strip_wikitext)
             .map(|text| {
                 TOKENIZER.with(|tokenizer| {
