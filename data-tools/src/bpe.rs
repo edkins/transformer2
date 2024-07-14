@@ -39,17 +39,19 @@ impl PairCounter {
             delta
         };
 
-        if new_value < 0 {
-            panic!("Negative pair count");
-        } else if new_value == 0 {
-            self.map.remove(&key);
-        } else {
-            let entry = self.map.entry(key).or_insert_with(|| (0, Vec::new()));
-            entry.0 += delta;
-            if entry.1.last() != Some(&word_id) {
-                entry.1.push(word_id);
+        match new_value {
+            ..=-1 => panic!("Negative pair count"),
+            0 => {
+                self.map.remove(&key);
             }
-            self.set.insert((new_value, key));
+            1.. => {
+                let entry = self.map.entry(key).or_insert_with(|| (0, Vec::new()));
+                entry.0 += delta;
+                if entry.1.last() != Some(&word_id) {
+                    entry.1.push(word_id);
+                }
+                self.set.insert((new_value, key));
+            }
         }
     }
 

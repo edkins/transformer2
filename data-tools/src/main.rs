@@ -6,24 +6,20 @@ use std::sync::Mutex;
 use base64::{prelude::BASE64_STANDARD, Engine};
 use byteorder::ReadBytesExt;
 use clap::{Parser, Subcommand};
-use rand::seq::SliceRandom;
-use rand::Rng;
-use rayon::iter::{IntoParallelRefIterator, ParallelBridge, ParallelIterator};
+use process_xml::Article;
+use rayon::iter::{ParallelBridge, ParallelIterator};
 
-use little_endian::LittleEndianStruct;
-use parallel_xml::{find_all_page_starts, read_page_starts};
-use progress_iter::ParallelProgressIter;
+use tokenize::TokenizerOutput;
 use word_counter::WordCounter;
 
 mod bpe;
 mod little_endian;
-mod parallel_xml;
 mod process_wikitext;
 mod process_xml;
-mod progress_iter;
 mod progress_reader;
 mod split_words;
 mod tokenize;
+mod train_test_split;
 mod word_counter;
 
 #[derive(Parser)]
@@ -36,12 +32,8 @@ struct Args {
 enum Command {
     Dictionary {
         filename: String,
-        #[clap(short = 's')]
-        split_filename: String,
         #[clap(short = 'o')]
         out_filename: String,
-        #[clap(short = 'n', default_value = "1000000")]
-        num_articles: usize,
     },
     Tokenize {
         filename: String,
@@ -55,52 +47,29 @@ enum Command {
     Print {
         dict_filename: String,
     },
-    Split {
-        filename: String,
-        #[clap(short = 'o')]
-        out_filename: String,
-    },
     Cat {
         filename: String,
         #[clap(short = 'd')]
         dict_filename: String,
-    }
+    },
 }
 
 fn main() {
     let cli = Args::parse();
     let time = std::time::Instant::now();
-    let mut rng = rand::thread_rng();
 
     match cli.subcmd {
         Command::Dictionary {
             filename,
-            split_filename,
             out_filename,
-            num_articles,
-        } => dictionary(
-            &mut rng,
-            &filename,
-            &split_filename,
-            &out_filename,
-            num_articles,
-        ),
+        } => dictionary(&filename, &out_filename),
         Command::Tokenize {
             filename,
             dict_filename,
             out_filename,
             parallelism,
-        } => tokenize(
-            &filename,
-            &dict_filename,
-            &out_filename,
-            parallelism,
-        ),
+        } => tokenize(&filename, &dict_filename, &out_filename, parallelism),
         Command::Print { dict_filename } => print_dict(&dict_filename),
-        Command::Split {
-            filename,
-            out_filename,
-        } => split_xml(&filename, &out_filename),
         Command::Cat {
             filename,
             dict_filename,
@@ -115,21 +84,21 @@ fn main() {
 fn cat(filename: &str, dict_filename: &str) {
     let dictionary = std::fs::File::open(dict_filename).unwrap();
     let dictionary = BufReader::new(dictionary);
-    let dictionary = 
-        std::iter::once(b"[--SEP--]".to_vec()).chain(dictionary.lines().map(|line| BASE64_STANDARD.decode(line.unwrap()).unwrap())).collect::<Vec<_>>();
+    let dictionary = std::iter::once(b"[--SEP--]".to_vec())
+        .chain(
+            dictionary
+                .lines()
+                .map(|line| BASE64_STANDARD.decode(line.unwrap()).unwrap()),
+        )
+        .collect::<Vec<_>>();
     let in_file = std::fs::File::open(filename).unwrap();
     let mut in_file = BufReader::new(in_file);
     let mut out_file = BufWriter::new(std::io::stdout());
     while let Ok(tok) = in_file.read_u16::<byteorder::LittleEndian>() {
-        out_file.write(&dictionary[tok as usize]).expect("Failed to write to stdout");
+        out_file
+            .write_all(&dictionary[tok as usize])
+            .expect("Failed to write to stdout");
     }
-}
-
-fn split_xml(filename: &str, out_filename: &str) {
-    let data = find_all_page_starts(filename);
-    let out_file = std::fs::File::create(out_filename).unwrap();
-    let mut out_buf = BufWriter::new(out_file);
-    data.write_little_endian(&mut out_buf);
 }
 
 fn byte_to_quoted_string(bytes: &[u8]) -> String {
@@ -151,24 +120,13 @@ fn print_dict(dict_filename: &str) {
     }
 }
 
-fn dictionary(
-    rng: &mut impl Rng,
-    filename: &str,
-    split_filename: &str,
-    out_filename: &str,
-    num_articles: usize,
-) {
-    let articles = read_page_starts(filename, split_filename);
-    articles
-        .choose_multiple(rng, articles.len()) // choose extra because some will be redirects and hence discarded
-        .cloned()
-        .collect::<Vec<_>>()
-        .par_iter()
-        .flat_map_iter(|section| process_xml::ArticleReader::new(section.buf_reader()))
-        .filter_map(process_wikitext::strip_wikitext)
-        .take_any(num_articles)
-        .show_progress(num_articles as u64)
-        .flat_map_iter(split_words::split_words)
+fn dictionary(filename: &str, out_filename: &str) {
+    let in_file = progress_read_input(filename);
+    process_xml::ArticleReader::new(in_file)
+        .par_bridge()
+        .filter(|a| a.tokenize)
+        .map(Article::strip_wikitext)
+        .flat_map_iter(|a| split_words::split_words(a.text))
         .collect::<WordCounter>()
         .into_bpe()
         .write_to_file(out_filename);
@@ -176,17 +134,20 @@ fn dictionary(
 
 thread_local! {static TOKENIZER: RefCell<tokenize::Tokenizer> = RefCell::new(tokenize::Tokenizer::default())}
 
-fn tokenize(
+fn progress_read_input(
     filename: &str,
-    dict_filename: &str,
-    out_filename: &str,
-    parallelism: usize,
-) {
-    let length = std::fs::metadata(filename).expect("Failed to get metadata").len();
-    let in_file = std::fs::File::open(filename).expect("Failed to open file");
-    let in_file = progress_reader::ProgressReader::new(in_file, length);
-    let in_file = BufReader::new(in_file);
-    let out_file = Mutex::new(BufWriter::new(std::fs::File::create(out_filename).unwrap()));
+) -> BufReader<progress_reader::ProgressReader<std::fs::File>> {
+    let length = std::fs::metadata(filename)
+        .expect("Failed to get metadata")
+        .len();
+    let file = std::fs::File::open(filename).expect("Failed to open file");
+    let file = progress_reader::ProgressReader::new(file, length);
+    BufReader::new(file)
+}
+
+fn tokenize(filename: &str, dict_filename: &str, out_filename: &str, parallelism: usize) {
+    let in_file = progress_read_input(filename);
+    let out_file = Mutex::new(TokenizerOutput::create(out_filename));
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(parallelism)
         .build()
@@ -194,22 +155,15 @@ fn tokenize(
     pool.install(move || {
         process_xml::ArticleReader::new(in_file)
             .par_bridge()
-            .filter_map(process_wikitext::strip_wikitext)
-            .map(|text| {
+            .map(Article::strip_wikitext)
+            .map(|a| {
                 TOKENIZER.with(|tokenizer| {
-                    let mut tokenizer = tokenizer.borrow_mut();
-                    split_words::split_words(text)
-                        .flat_map(|word| {
-                            tokenizer
-                                .initialize_and_tokenize(dict_filename, word)
-                                .to_vec()
-                        })
-                        .chain(std::iter::once(0))
-                        .collect::<Vec<_>>()
+                    tokenizer
+                        .borrow_mut()
+                        .initialize_and_tokenize_article(dict_filename, a)
                 })
             })
-            .for_each(|vec| {
-                vec.write_little_endian(&mut*out_file.lock().expect("Poisoned."));
-            })
+            .for_each(|a| out_file.lock().expect("Poisoned").write_article(a));
+        out_file.into_inner().expect("Poisoned").write_metadata();
     });
 }

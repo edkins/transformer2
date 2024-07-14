@@ -8,6 +8,8 @@ use nom::{
     IResult,
 };
 
+use crate::process_xml::Article;
+
 fn plain(i: &str) -> IResult<&str, &str> {
     recognize(many1(satisfy(
         |c| matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | ' ' | '\n' | ',' | '.' | '(' | ')' | ':' | '-' | '!' | '/'),
@@ -157,16 +159,26 @@ fn item(i: &str) -> IResult<&str, &str> {
     ))(i)
 }
 
-pub fn strip_wikitext(input: String) -> Option<String> {
+pub fn strip_wikitext(input: String) -> String {
     if input.starts_with("#REDIRECT ") {
-        None
-    } else {
-        let mut result = String::new();
-        if let Ok((_, items)) = many0(item)(&input) {
-            for item in &items {
-                result.push_str(item);
-            }
+        panic!("Not expecting redirect for {}", input);
+    }
+    let mut result = String::new();
+    if let Ok((_, items)) = many0(item)(&input) {
+        for item in &items {
+            result.push_str(item);
         }
-        Some(result)
+    }
+    result
+}
+
+impl Article {
+    pub fn strip_wikitext(self) -> Self {
+        Article {
+            url: self.url,
+            text: strip_wikitext(self.text),
+            split: self.split,
+            tokenize: self.tokenize,
+        }
     }
 }
