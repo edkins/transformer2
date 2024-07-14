@@ -48,8 +48,10 @@ impl<R: BufRead> Iterator for ArticleReader<R> {
                     // }
                     _ => {}
                 },
-                Ok(Event::Empty(e)) => if e.local_name().into_inner() == b"redirect" {
-                    redirect = true;
+                Ok(Event::Empty(e)) => {
+                    if e.local_name().into_inner() == b"redirect" {
+                        redirect = true;
+                    }
                 }
                 Ok(Event::End(e)) => {
                     match e.local_name().into_inner() {

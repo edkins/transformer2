@@ -114,18 +114,18 @@ pub struct ArticleMetadata {
     pub token_end: u64,
 }
 
-#[derive(Serialize)]
-struct AllMetadata<'a> {
-    train: &'a [ArticleMetadata],
-    validation: &'a [ArticleMetadata],
-    test: &'a [ArticleMetadata],
-}
+// #[derive(Serialize)]
+// struct AllMetadata<'a> {
+//     train: &'a [ArticleMetadata],
+//     validation: &'a [ArticleMetadata],
+//     test: &'a [ArticleMetadata],
+// }
 
 pub struct TokenizerOutput {
     files: [BufWriter<File>; 3],
     lengths: [u64; 3],
     metadata: [Vec<ArticleMetadata>; 3],
-    metadata_filename: String,
+    metadata_filename: [String; 3],
 }
 
 impl TokenizerOutput {
@@ -134,7 +134,11 @@ impl TokenizerOutput {
             files: [open(filename, 0), open(filename, 1), open(filename, 2)],
             lengths: [0, 0, 0],
             metadata: [vec![], vec![], vec![]],
-            metadata_filename: format!("{}.metadata", filename),
+            metadata_filename: [
+                format!("{}.metadata.{}", filename, Split::from_n(0).to_str()),
+                format!("{}.metadata.{}", filename, Split::from_n(1).to_str()),
+                format!("{}.metadata.{}", filename, Split::from_n(2).to_str()),
+            ],
         }
     }
 
@@ -152,7 +156,10 @@ impl TokenizerOutput {
     }
 
     pub fn write_metadata(self) {
-        let metadata_file =
+        for (split, metadata) in self.metadata.iter().enumerate() {
+            write_condensed(metadata, &self.metadata_filename[split]);
+        }
+        /*let metadata_file =
             File::create(self.metadata_filename).expect("Failed to create metadata file");
         serde_json::to_writer(
             metadata_file,
@@ -162,7 +169,8 @@ impl TokenizerOutput {
                 test: &self.metadata[Split::Test.to_n()],
             },
         )
-        .expect("Failed to serialize metadata");
+        .expect("Failed to serialize metadata");*/
+        
     }
 }
 
@@ -170,4 +178,20 @@ fn open(filename: &str, split_n: usize) -> BufWriter<File> {
     let filename = format!("{}.{}", filename, Split::from_n(split_n).to_str());
     let out_file = File::create(filename).expect("Failed to create output file");
     BufWriter::new(out_file)
+}
+
+pub fn write_condensed(metadata: &[ArticleMetadata], filename: &str) {
+    let mut nums = vec![];
+    for metadata in metadata {
+        // if metadata
+        //     .url
+        //     .starts_with("https://en.wikipedia.org/wiki/Wikipedia%3A")
+        // {
+        //     continue;
+        // }
+        nums.push(metadata.token_start);
+        nums.push(metadata.token_end);
+    }
+    let mut file = BufWriter::new(File::create(filename).unwrap());
+    nums.write_little_endian(&mut file);
 }

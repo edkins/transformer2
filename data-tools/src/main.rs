@@ -11,9 +11,8 @@ use process_xml::Article;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 
 use serde::Deserialize;
-use tokenize::{ArticleMetadata, TokenizerOutput};
+use tokenize::{write_condensed, ArticleMetadata, TokenizerOutput};
 use word_counter::WordCounter;
-use little_endian::LittleEndianStruct;
 
 mod bpe;
 mod little_endian;
@@ -47,6 +46,9 @@ enum Command {
         #[clap(short = 'p', default_value = "8")]
         parallelism: usize,
     },
+    Condense {
+        filename: String,
+    },
     Print {
         dict_filename: String,
     },
@@ -55,7 +57,7 @@ enum Command {
         #[clap(short = 'd')]
         dict_filename: String,
     },
-    Condense {
+    Clean {
         filename: String,
     },
 }
@@ -81,6 +83,7 @@ fn main() {
             dict_filename,
         } => cat(&filename, &dict_filename),
         Command::Condense { filename } => condense(&filename),
+        Command::Clean { filename } => clean(&filename),
     }
 
     println!("Elapsed time: {:?}", time.elapsed());
@@ -93,24 +96,31 @@ struct AllMetadataIn {
     test: Vec<ArticleMetadata>,
 }
 
-fn write_condensed(metadata: &[ArticleMetadata], filename: &str) {
-    let mut nums = vec![];
-    for metadata in metadata {
-        if metadata.url.starts_with("https://en.wikipedia.org/wiki/Wikipedia%3A") {
-            continue;
-        }
-        nums.push(metadata.token_start);
-        nums.push(metadata.token_end);
-    }
-    let mut file = BufWriter::new(File::create(filename).unwrap());
-    nums.write_little_endian(&mut file);
+fn clean(filename: &str) {
+    let in_file = BufReader::new(File::open(filename).unwrap());
+    process_xml::ArticleReader::new(in_file)
+        .skip(10_000)
+        .take(10_000)
+        .for_each(|a| {
+            //a.text.chars().take(3000).for_each(|c| print!("{}", c));
+            //println!("\n-----------");
+            a.strip_wikitext()
+                .text
+                .chars()
+                .take(2000)
+                .for_each(|c| print!("{}", c));
+            println!("\n-----------");
+        });
 }
 
 fn condense(filename: &str) {
     let metadata = File::open(format!("{}.metadata", filename)).unwrap();
     let metadata: AllMetadataIn = serde_json::from_reader(BufReader::new(metadata)).unwrap();
     write_condensed(&metadata.train, &format!("{}.metadata.train", filename));
-    write_condensed(&metadata.validation, &format!("{}.metadata.validation", filename));
+    write_condensed(
+        &metadata.validation,
+        &format!("{}.metadata.validation", filename),
+    );
     write_condensed(&metadata.test, &format!("{}.metadata.test", filename));
 }
 
@@ -167,9 +177,7 @@ fn dictionary(filename: &str, out_filename: &str) {
 
 thread_local! {static TOKENIZER: RefCell<tokenize::Tokenizer> = RefCell::new(tokenize::Tokenizer::default())}
 
-fn progress_read_input(
-    filename: &str,
-) -> BufReader<progress_reader::ProgressReader<File>> {
+fn progress_read_input(filename: &str) -> BufReader<progress_reader::ProgressReader<File>> {
     let length = std::fs::metadata(filename)
         .expect("Failed to get metadata")
         .len();
