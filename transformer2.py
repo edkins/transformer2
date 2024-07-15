@@ -54,7 +54,7 @@ class Tokenizer:
         return b''.join(self.tokens[t] for t in tensor).decode('utf-8', errors='replace')
 
 def param(*size):
-    return torch.nn.Parameter(torch.randn(size) / 20)
+    return torch.nn.Parameter(torch.randn(size, dtype=torch.float32) / 20)
 
 class TransformerModel(torch.nn.Module):
     def __init__(self, n_layer: int, n_head: int, n_dict: int, d_model: int, d_k: int, d_hidden: int, n_context: int):
@@ -65,6 +65,7 @@ class TransformerModel(torch.nn.Module):
         self.wk = param(n_layer, n_head, d_model, d_k)
         self.wv = param(n_layer, n_head, d_model, d_model)
         self.mlp0 = param(n_layer, d_model, d_hidden)
+        self.mlpb = param(n_layer, 1, d_hidden)
         self.mlp1 = param(n_layer, d_hidden, d_model)
         self.unembedding = param(d_model, n_dict)
         self.bias = param(1,1,n_dict)
@@ -79,14 +80,14 @@ class TransformerModel(torch.nn.Module):
             k = torch.einsum('bom,hmk->bhok', x, self.wk[layer])
             v = torch.einsum('bom,hmv->bhov', x, self.wv[layer])
             attn = torch.einsum('bhtq,bhoq->bhto', q, k)
-            attn = torch.exp(attn)
+            attn = torch.exp(attn.clamp(max=50))
             attn = torch.tril(attn)
             attn = attn / (attn.sum(dim=-1, keepdim=True) + 1e-10)
             x = x + torch.einsum('bhto,bhov->btv', attn, v)
 
             # mlp
             y = torch.einsum('btm,mh->bth', x, self.mlp0[layer])
-            y = torch.relu(y)
+            y = torch.relu(y + self.mlpb[layer])
             y = torch.einsum('bth,hm->btm', y, self.mlp1[layer])
             x = x + y
 
@@ -120,7 +121,7 @@ def train(model, slurper, n_batches, vbatch, vmask, device, tokenizer):
         opt.step()
         opt.zero_grad()
         loss_sum += loss.detach()
-        if (i + 1) % 5000 == 0:
+        if (i + 1) % 2500 == 0:
             #print(f'Batch {i+1}, loss: {loss_sum.item() / 1000}')
             loss_sum = 0
             #print(tokenizer.decode(batch[0]))
@@ -128,6 +129,7 @@ def train(model, slurper, n_batches, vbatch, vmask, device, tokenizer):
             print(f'Batch {i+1}, loss: {vloss}')
             for i in range(min(5,len(vbatch))):
                 print(prediction_to_string(model, tokenizer, vbatch[i,:10]))
+            print()
 
 def prediction_to_string(model, tokenizer, prompt_tokens, n_tokens=30):
     result = predict_slow_temperature_zero(model, tokenizer, prompt_tokens, n_tokens)
