@@ -102,8 +102,9 @@ def validation(model, batch, mask):
         br = batch[:,1:].reshape(-1).long()[mr]
         #print(batch.shape, y.shape, mr.shape, yr.shape, br.shape)
         loss = torch.nn.functional.cross_entropy(yr, br, reduction='mean')
-        print(f'  Validation loss: {loss.item()}')
+        #print(f'  Validation loss: {loss.item()}')
         #print(tokenizer.decode(batch[0]))
+        return loss.item()
 
 def train(model, slurper, n_batches, vbatch, vmask, device, tokenizer):
     opt = torch.optim.Adam(model.parameters(), lr=0.001)
@@ -119,16 +120,18 @@ def train(model, slurper, n_batches, vbatch, vmask, device, tokenizer):
         opt.step()
         opt.zero_grad()
         loss_sum += loss.detach()
-        if (i + 1) % 1000 == 0:
-            print(f'Batch {i+1}, loss: {loss_sum.item() / 1000}')
+        if (i + 1) % 5000 == 0:
+            #print(f'Batch {i+1}, loss: {loss_sum.item() / 1000}')
             loss_sum = 0
             #print(tokenizer.decode(batch[0]))
-            validation(model, vbatch, vmask)
-            print_prediction(model, tokenizer, vbatch[0,:10])
+            vloss = validation(model, vbatch, vmask)
+            print(f'Batch {i+1}, loss: {vloss}')
+            for i in range(min(5,len(vbatch))):
+                print(prediction_to_string(model, tokenizer, vbatch[i,:10]))
 
-def print_prediction(model, tokenizer, prompt_tokens, n_tokens=30):
+def prediction_to_string(model, tokenizer, prompt_tokens, n_tokens=30):
     result = predict_slow_temperature_zero(model, tokenizer, prompt_tokens, n_tokens)
-    print(f'{tokenizer.decode(prompt_tokens)} --> {tokenizer.decode(result).replace("\n","\\n")}')
+    return f'{tokenizer.decode(prompt_tokens).replace("\n","\\n")} --> {tokenizer.decode(result).replace("\n","\\n")}'
 
 def predict_slow_temperature_zero(model, tokenizer, prompt_tokens, n_tokens):
     result = torch.zeros(n_tokens, dtype=torch.uint16)
@@ -150,8 +153,8 @@ def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     tokenizer = Tokenizer(dict_filename)
     
-    n_layer = 1
-    n_head = 2
+    n_layer = 2
+    n_head = 4
     n_dict = len(tokenizer.tokens)
     n_batch = 1
     n_context = 128
