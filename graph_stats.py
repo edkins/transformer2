@@ -20,10 +20,11 @@ def main():
     losses = dataset['losses']
     xs = [point['time'] for point in losses]
     stat_names = [name for name,_ in dataset['losses'][0]['stats']]
-    for stat in stat_names:
-        ys = [get_stat(point['stats'], stat) for point in dataset['losses']]
-        fig.add_trace(go.Scatter(x=xs, y=ys, mode='lines', name=stat))
-        fig.update_layout(xaxis_title='time', yaxis_title='stat')
+    for stat in reversed(stat_names):
+        if stat == 'embed' or stat[0] == 'r':
+            ys = [get_stat(point['stats'], stat) for point in dataset['losses']]
+            fig.add_trace(go.Scatter(x=xs, y=ys, mode='lines', name=stat))
+    fig.update_layout(xaxis_title='time', yaxis_title='norm', yaxis_range=[0, None], title_text=dataset['filename'])
     fig.show()
 
 if __name__ == '__main__':

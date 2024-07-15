@@ -58,11 +58,22 @@ class Tokenizer:
 def param(*size, mag=0.05):
     return torch.nn.Parameter(torch.randn(size, dtype=torch.float32) * mag)
 
+def constant(value: float):
+    return torch.nn.Parameter(torch.tensor(value, dtype=torch.float32), requires_grad=False)
+
 class TransformerModel(torch.nn.Module):
-    def __init__(self, n_layer: int, n_head: int, n_dict: int, d_model: int, d_k: int, d_hidden: int, n_context: int, mag: float):
+    def __init__(self, n_layer: int, n_head: int, n_dict: int, d_model: int, d_k: int, d_hidden: int, n_context: int, mag: float, adiv: float, pdiv: float, fixedpos: bool):
         super().__init__()
         self.embedding = param(n_dict, d_model, mag=mag)
-        self.pos_embedding = param(1, n_context, d_model, mag=mag)
+        if fixedpos:
+            pos_embedding = torch.zeros(n_context, d_model)
+            # d_model must be even for this
+            for i2 in range(0,d_model,2):
+                pos_embedding[:,i2] = torch.sin(torch.arange(n_context, dtype=torch.float32) / 10000**(i2/d_model))
+                pos_embedding[:,i2+1] = torch.cos(torch.arange(n_context, dtype=torch.float32) / 10000**(i2/d_model))
+            self.pos_embedding = torch.nn.Parameter(pos_embedding, requires_grad=False)
+        else:
+            self.pos_embedding = param(1, n_context, d_model, mag=mag)
         if d_k > 0:
             self.wq = param(n_layer, n_head, d_model, d_k, mag=mag)
             self.wk = param(n_layer, n_head, d_model, d_k, mag=mag)
@@ -75,6 +86,8 @@ class TransformerModel(torch.nn.Module):
         self.n_layer = n_layer
         self.n_head = n_head
         self.d_k = d_k
+        self.amul = constant(1/adiv)
+        self.pmul = constant(1/pdiv)
     
     def forward(self, x: torch.Tensor, last_only: bool, capture_stats: bool) -> tuple[torch.Tensor, list]:
         x = torch.nn.functional.embedding(x.long(), self.embedding) + self.pos_embedding[:, :x.shape[1], :]
@@ -91,7 +104,7 @@ class TransformerModel(torch.nn.Module):
                 attn = torch.tril(attn)
                 attn = attn / (attn.sum(dim=-1, keepdim=True) + 1e-10)
                 vsum = torch.einsum('bhto,bhov->btv', attn, v)
-                x = x + vsum
+                x = x + vsum * self.amul
                 if capture_stats:
                     stats.append([f'vsum{layer}',vsum.norm().item()])
                     stats.append([f'r_mid{layer}',x.norm().item()])
@@ -100,7 +113,7 @@ class TransformerModel(torch.nn.Module):
             y = torch.einsum('btm,mh->bth', x, self.mlp0[layer])
             y = torch.relu(y + self.mlpb[layer])
             y = torch.einsum('bth,hm->btm', y, self.mlp1[layer])
-            x = x + y
+            x = x + y * self.pmul
             if capture_stats:
                 stats.append([f'y{layer}',y.norm().item()])
                 stats.append([f'r_end{layer}',x.norm().item()])
@@ -190,6 +203,9 @@ def main():
     parser.add_argument('--dhidden', type=int, default=128)
     parser.add_argument('--time', type=int, default=300)
     parser.add_argument('--mag', type=float, default=0.05)
+    parser.add_argument('--adiv', type=float, default=1.0)
+    parser.add_argument('--pdiv', type=float, default=1.0)
+    parser.add_argument('--fixedpos', type=bool, default=False)
     args = parser.parse_args()
     input_filename = args.input_file
     dict_filename = f'{input_filename}.dictionary'
@@ -210,7 +226,7 @@ def main():
     slurper = DataSlurper(input_filename, 'train', device, n_batch, n_context)
     vbatch, vmask = vslurper.batch()
 
-    model = TransformerModel(n_layer, n_head, n_dict, d_model, d_k, d_hidden, n_context, args.mag).to(device)
+    model = TransformerModel(n_layer, n_head, n_dict, d_model, d_k, d_hidden, n_context, args.mag, args.adiv, args.pdiv, args.fixedpos).to(device)
 
     # with torch.no_grad():
     #     vbatch2 = torch.stack([vbatch[0]] * 2)
@@ -219,7 +235,7 @@ def main():
     #     y = model(vbatch2)
     #     print(y[:,:,0])
 
-    print(f"Training with n_layer={n_layer}, n_head={n_head}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}")
+    print(f"Training with n_layer={n_layer}, n_head={n_head}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}, adiv={args.adiv}, pdiv={args.pdiv}, fixedpos={args.fixedpos}")
     losses = train(model, slurper, args.time, vbatch, vmask, device, tokenizer)
     with open(args.o, 'w') as f:
         json.dump({
@@ -230,6 +246,9 @@ def main():
                 'd_k': d_k,
                 'd_hidden': d_hidden,
                 'mag': args.mag,
+                'adiv': args.adiv,
+                'pdiv': args.pdiv,
+                'fixedpos': args.fixedpos,
             },
             'losses': losses,
         }, f, indent=2)
