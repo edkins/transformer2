@@ -13,6 +13,7 @@ class DataSlurper:
         self.device = device
         self.n_batch = n_batch
         self.n_context = n_context
+        print(f"Number of {split} articles: {len(self.metadata)}")
 
     def _pick_articles(self, n: int) -> torch.Tensor:
         indices = torch.randint(0, len(self.metadata), (n,))
@@ -37,7 +38,7 @@ class DataSlurper:
                 read_bytes = self.file.read(end-start)
                 read_tensor = torch.frombuffer(read_bytes, dtype=torch.int16)
                 result[i,1:1+len(read_tensor)] = read_tensor
-                result_mask[i,:len(read_tensor)] = True
+                result_mask[i,:1+len(read_tensor)] = True
             return result.to(self.device), result_mask.to(self.device)
 
 class Tokenizer:
@@ -56,21 +57,22 @@ def param(*size):
     return torch.nn.Parameter(torch.randn(size) / 20)
 
 class TransformerModel(torch.nn.Module):
-    def __init__(self, n_layer: int, n_head: int, n_dict: int, d_model: int, d_k: int, d_hidden: int):
+    def __init__(self, n_layer: int, n_head: int, n_dict: int, d_model: int, d_k: int, d_hidden: int, n_context: int):
         super().__init__()
         self.embedding = param(n_dict, d_model)
+        self.pos_embedding = param(1, n_context, d_model)
         self.wq = param(n_layer, n_head, d_model, d_k)
         self.wk = param(n_layer, n_head, d_model, d_k)
         self.wv = param(n_layer, n_head, d_model, d_model)
         self.mlp0 = param(n_layer, d_model, d_hidden)
         self.mlp1 = param(n_layer, d_hidden, d_model)
         self.unembedding = param(d_model, n_dict)
-        self.bias = param(n_dict)
+        self.bias = param(1,1,n_dict)
         self.n_layer = n_layer
         self.n_head = n_head
     
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = torch.nn.functional.embedding(x.long(), self.embedding)
+    def forward(self, x: torch.Tensor, last_only: bool) -> torch.Tensor:
+        x = torch.nn.functional.embedding(x.long(), self.embedding) + self.pos_embedding[:, :x.shape[1], :]
         for layer in range(self.n_layer):
             # attention
             q = torch.einsum('btm,hmq->bhtq', x, self.wq[layer])
@@ -88,23 +90,27 @@ class TransformerModel(torch.nn.Module):
             y = torch.einsum('bth,hm->btm', y, self.mlp1[layer])
             x = x + y
 
+        if last_only:
+            x = x[:,-1:,:]
         return torch.einsum('btm,md->btd', x, self.unembedding) + self.bias
 
-def validation(model, batch, mask, tokenizer):
+def validation(model, batch, mask):
     with torch.no_grad():
-        y = model(batch)
+        y = model(batch,False)
         mr = mask[:,1:].reshape(-1)
         yr = y[:,:-1,:].reshape(-1, y.shape[-1])[mr]
         br = batch[:,1:].reshape(-1).long()[mr]
+        #print(batch.shape, y.shape, mr.shape, yr.shape, br.shape)
         loss = torch.nn.functional.cross_entropy(yr, br, reduction='mean')
         print(f'  Validation loss: {loss.item()}')
         #print(tokenizer.decode(batch[0]))
 
-def train(model, slurper, n_batches, vbatch, vmask, tokenizer):
+def train(model, slurper, n_batches, vbatch, vmask, device, tokenizer):
     opt = torch.optim.Adam(model.parameters(), lr=0.001)
+    loss_sum = torch.zeros((), device=device)
     for i in range(n_batches):
         batch, mask = slurper.batch()
-        y = model(batch)
+        y = model(batch,False)
         mr = mask[:,1:].reshape(-1)
         yr = y[:,:-1,:].reshape(-1, y.shape[-1])[mr]
         br = batch[:,1:].reshape(-1).long()[mr]
@@ -112,10 +118,28 @@ def train(model, slurper, n_batches, vbatch, vmask, tokenizer):
         loss.backward()
         opt.step()
         opt.zero_grad()
+        loss_sum += loss.detach()
         if (i + 1) % 1000 == 0:
-            print(f'Batch {i+1}, loss: {loss.item()}')
+            print(f'Batch {i+1}, loss: {loss_sum.item() / 1000}')
+            loss_sum = 0
             #print(tokenizer.decode(batch[0]))
-            validation(model, vbatch, vmask, tokenizer)
+            validation(model, vbatch, vmask)
+            print_prediction(model, tokenizer, vbatch[0,:10])
+
+def print_prediction(model, tokenizer, prompt_tokens, n_tokens=30):
+    result = predict_slow_temperature_zero(model, tokenizer, prompt_tokens, n_tokens)
+    print(f'{tokenizer.decode(prompt_tokens)} --> {tokenizer.decode(result).replace("\n","\\n")}')
+
+def predict_slow_temperature_zero(model, tokenizer, prompt_tokens, n_tokens):
+    result = torch.zeros(n_tokens, dtype=torch.uint16)
+    prompt = prompt_tokens.reshape(1,-1)
+    with torch.no_grad():
+        for i in range(n_tokens):
+            y = model(prompt,True)
+            next_token = torch.argmax(y[0,-1,:]).to(torch.uint16)
+            prompt = torch.cat([prompt, next_token.reshape(1,1)], dim=1)
+            result[i] = next_token
+        return result
 
 def main():
     parser = argparse.ArgumentParser()
@@ -139,8 +163,17 @@ def main():
     vslurper = DataSlurper(input_filename, 'validation', device, 64, n_context)
     slurper = DataSlurper(input_filename, 'train', device, n_batch, n_context)
     vbatch, vmask = vslurper.batch()
-    model = TransformerModel(n_layer, n_head, n_dict, d_model, d_k, d_hidden).to(device)
-    train(model, slurper, 20000, vbatch, vmask, tokenizer)
+
+    model = TransformerModel(n_layer, n_head, n_dict, d_model, d_k, d_hidden, n_context).to(device)
+
+    # with torch.no_grad():
+    #     vbatch2 = torch.stack([vbatch[0]] * 2)
+    #     vbatch2[1,5:] = 123
+    #     print(vbatch2)
+    #     y = model(vbatch2)
+    #     print(y[:,:,0])
+
+    train(model, slurper, 100000, vbatch, vmask, device, tokenizer)
 
 if __name__ == '__main__':
     main()
