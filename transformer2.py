@@ -55,23 +55,23 @@ class Tokenizer:
             raise ValueError('Expected a 1D tensor')
         return b''.join(self.tokens[t] for t in tensor).decode('utf-8', errors='replace')
 
-def param(*size):
-    return torch.nn.Parameter(torch.randn(size, dtype=torch.float32) / 20)
+def param(*size, mag=0.05):
+    return torch.nn.Parameter(torch.randn(size, dtype=torch.float32) * mag)
 
 class TransformerModel(torch.nn.Module):
-    def __init__(self, n_layer: int, n_head: int, n_dict: int, d_model: int, d_k: int, d_hidden: int, n_context: int):
+    def __init__(self, n_layer: int, n_head: int, n_dict: int, d_model: int, d_k: int, d_hidden: int, n_context: int, mag: float):
         super().__init__()
-        self.embedding = param(n_dict, d_model)
-        self.pos_embedding = param(1, n_context, d_model)
+        self.embedding = param(n_dict, d_model, mag=mag)
+        self.pos_embedding = param(1, n_context, d_model, mag=mag)
         if d_k > 0:
-            self.wq = param(n_layer, n_head, d_model, d_k)
-            self.wk = param(n_layer, n_head, d_model, d_k)
-            self.wv = param(n_layer, n_head, d_model, d_model)
-        self.mlp0 = param(n_layer, d_model, d_hidden)
-        self.mlpb = param(n_layer, 1, d_hidden)
-        self.mlp1 = param(n_layer, d_hidden, d_model)
-        self.unembedding = param(d_model, n_dict)
-        self.bias = param(1,1,n_dict)
+            self.wq = param(n_layer, n_head, d_model, d_k, mag=mag)
+            self.wk = param(n_layer, n_head, d_model, d_k, mag=mag)
+            self.wv = param(n_layer, n_head, d_model, d_model, mag=mag)
+        self.mlp0 = param(n_layer, d_model, d_hidden, mag=mag)
+        self.mlpb = param(n_layer, 1, d_hidden, mag=mag)
+        self.mlp1 = param(n_layer, d_hidden, d_model, mag=mag)
+        self.unembedding = param(d_model, n_dict, mag=mag)
+        self.bias = param(1,1,n_dict, mag=mag)
         self.n_layer = n_layer
         self.n_head = n_head
         self.d_k = d_k
@@ -175,6 +175,7 @@ def main():
     parser.add_argument('--dk', type=int, default=4)
     parser.add_argument('--dhidden', type=int, default=128)
     parser.add_argument('--time', type=int, default=300)
+    parser.add_argument('--mag', type=float, default=0.05)
     args = parser.parse_args()
     input_filename = args.input_file
     dict_filename = f'{input_filename}.dictionary'
@@ -195,7 +196,7 @@ def main():
     slurper = DataSlurper(input_filename, 'train', device, n_batch, n_context)
     vbatch, vmask = vslurper.batch()
 
-    model = TransformerModel(n_layer, n_head, n_dict, d_model, d_k, d_hidden, n_context).to(device)
+    model = TransformerModel(n_layer, n_head, n_dict, d_model, d_k, d_hidden, n_context, args.mag).to(device)
 
     # with torch.no_grad():
     #     vbatch2 = torch.stack([vbatch[0]] * 2)
@@ -204,7 +205,7 @@ def main():
     #     y = model(vbatch2)
     #     print(y[:,:,0])
 
-    print(f"Training with n_layer={n_layer}, n_head={n_head}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}")
+    print(f"Training with n_layer={n_layer}, n_head={n_head}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}")
     losses = train(model, slurper, args.time, vbatch, vmask, device, tokenizer)
     with open(args.o, 'w') as f:
         json.dump({
