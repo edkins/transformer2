@@ -132,16 +132,20 @@ def train(model, slurper, n_batches, vbatch, vmask, device, tokenizer):
             print()
 
 def prediction_to_string(model, tokenizer, prompt_tokens, n_tokens=30):
-    result = predict_slow_temperature_zero(model, tokenizer, prompt_tokens, n_tokens)
+    result = predict_slow(model, prompt_tokens, n_tokens, 0.8)
     return f'{tokenizer.decode(prompt_tokens).replace("\n","\\n")} --> {tokenizer.decode(result).replace("\n","\\n")}'
 
-def predict_slow_temperature_zero(model, tokenizer, prompt_tokens, n_tokens):
+def predict_slow(model, prompt_tokens, n_tokens, temperature=0):
     result = torch.zeros(n_tokens, dtype=torch.uint16)
     prompt = prompt_tokens.reshape(1,-1)
     with torch.no_grad():
         for i in range(n_tokens):
             y = model(prompt,True)
-            next_token = torch.argmax(y[0,-1,:]).to(torch.uint16)
+            if temperature == 0:
+                next_token = torch.argmax(y[0,-1,:]).to(torch.uint16)
+            else:
+                probs = torch.softmax(y[0,-1,:] / temperature, dim=-1)
+                next_token = torch.multinomial(probs, 1).to(torch.uint16)
             prompt = torch.cat([prompt, next_token.reshape(1,1)], dim=1)
             result[i] = next_token
         return result
@@ -155,14 +159,15 @@ def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     tokenizer = Tokenizer(dict_filename)
     
-    n_layer = 2
-    n_head = 4
+    n_layer = 1
+    n_head = 2
     n_dict = len(tokenizer.tokens)
     n_batch = 1
     n_context = 128
-    d_model = 32
-    d_k = 8
-    d_hidden = 1024
+    d_model = 128
+    d_k = 4
+    d_hidden = 128
+    n_batches = 300_000
 
     torch.manual_seed(12345)
     vslurper = DataSlurper(input_filename, 'validation', device, 64, n_context)
@@ -178,7 +183,7 @@ def main():
     #     y = model(vbatch2)
     #     print(y[:,:,0])
 
-    train(model, slurper, 100000, vbatch, vmask, device, tokenizer)
+    train(model, slurper, n_batches, vbatch, vmask, device, tokenizer)
 
 if __name__ == '__main__':
     main()
