@@ -63,9 +63,10 @@ class TransformerModel(torch.nn.Module):
         super().__init__()
         self.embedding = param(n_dict, d_model)
         self.pos_embedding = param(1, n_context, d_model)
-        self.wq = param(n_layer, n_head, d_model, d_k)
-        self.wk = param(n_layer, n_head, d_model, d_k)
-        self.wv = param(n_layer, n_head, d_model, d_model)
+        if d_k > 0:
+            self.wq = param(n_layer, n_head, d_model, d_k)
+            self.wk = param(n_layer, n_head, d_model, d_k)
+            self.wv = param(n_layer, n_head, d_model, d_model)
         self.mlp0 = param(n_layer, d_model, d_hidden)
         self.mlpb = param(n_layer, 1, d_hidden)
         self.mlp1 = param(n_layer, d_hidden, d_model)
@@ -73,19 +74,21 @@ class TransformerModel(torch.nn.Module):
         self.bias = param(1,1,n_dict)
         self.n_layer = n_layer
         self.n_head = n_head
+        self.d_k = d_k
     
     def forward(self, x: torch.Tensor, last_only: bool) -> torch.Tensor:
         x = torch.nn.functional.embedding(x.long(), self.embedding) + self.pos_embedding[:, :x.shape[1], :]
         for layer in range(self.n_layer):
-            # attention
-            q = torch.einsum('btm,hmq->bhtq', x, self.wq[layer])
-            k = torch.einsum('bom,hmk->bhok', x, self.wk[layer])
-            v = torch.einsum('bom,hmv->bhov', x, self.wv[layer])
-            attn = torch.einsum('bhtq,bhoq->bhto', q, k)
-            attn = torch.exp(attn.clamp(max=50))
-            attn = torch.tril(attn)
-            attn = attn / (attn.sum(dim=-1, keepdim=True) + 1e-10)
-            x = x + torch.einsum('bhto,bhov->btv', attn, v)
+            if self.d_k > 0:
+                # attention
+                q = torch.einsum('btm,hmq->bhtq', x, self.wq[layer])
+                k = torch.einsum('bom,hmk->bhok', x, self.wk[layer])
+                v = torch.einsum('bom,hmv->bhov', x, self.wv[layer])
+                attn = torch.einsum('bhtq,bhoq->bhto', q, k)
+                attn = torch.exp(attn.clamp(max=50))
+                attn = torch.tril(attn)
+                attn = attn / (attn.sum(dim=-1, keepdim=True) + 1e-10)
+                x = x + torch.einsum('bhto,bhov->btv', attn, v)
 
             # mlp
             y = torch.einsum('btm,mh->bth', x, self.mlp0[layer])

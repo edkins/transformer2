@@ -16,6 +16,8 @@ def main():
                     item['filename'] = entry.name
                     data.append(item)
     
+    data.sort(key=lambda x: (x['hyper']['n_layer'], x['hyper']['n_head'], x['hyper']['d_model'], x['hyper']['d_k'], x['hyper']['d_hidden']))
+
     fig = go.Figure()
     for dataset in data:
         losses = dataset['losses']
