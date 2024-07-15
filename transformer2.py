@@ -76,8 +76,10 @@ class TransformerModel(torch.nn.Module):
         self.n_head = n_head
         self.d_k = d_k
     
-    def forward(self, x: torch.Tensor, last_only: bool) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, last_only: bool, capture_stats: bool) -> tuple[torch.Tensor, list]:
         x = torch.nn.functional.embedding(x.long(), self.embedding) + self.pos_embedding[:, :x.shape[1], :]
+        if capture_stats:
+            stats = [['embed',x.norm().item()]]
         for layer in range(self.n_layer):
             if self.d_k > 0:
                 # attention
@@ -88,21 +90,32 @@ class TransformerModel(torch.nn.Module):
                 attn = torch.exp(attn.clamp(max=50))
                 attn = torch.tril(attn)
                 attn = attn / (attn.sum(dim=-1, keepdim=True) + 1e-10)
-                x = x + torch.einsum('bhto,bhov->btv', attn, v)
+                vsum = torch.einsum('bhto,bhov->btv', attn, v)
+                x = x + vsum
+                if capture_stats:
+                    stats.append([f'vsum{layer}',vsum.norm().item()])
+                    stats.append([f'r_mid{layer}',x.norm().item()])
 
             # mlp
             y = torch.einsum('btm,mh->bth', x, self.mlp0[layer])
             y = torch.relu(y + self.mlpb[layer])
             y = torch.einsum('bth,hm->btm', y, self.mlp1[layer])
             x = x + y
+            if capture_stats:
+                stats.append([f'y{layer}',y.norm().item()])
+                stats.append([f'r_end{layer}',x.norm().item()])
 
         if last_only:
             x = x[:,-1:,:]
-        return torch.einsum('btm,md->btd', x, self.unembedding) + self.bias
+        result = torch.einsum('btm,md->btd', x, self.unembedding) + self.bias
+        if capture_stats:
+            return result, stats
+        else:
+            return result, None
 
 def validation(model, batch, mask):
     with torch.no_grad():
-        y = model(batch,False)
+        y, stats = model(batch,False,True)
         mr = mask[:,1:].reshape(-1)
         yr = y[:,:-1,:].reshape(-1, y.shape[-1])[mr]
         br = batch[:,1:].reshape(-1).long()[mr]
@@ -110,7 +123,7 @@ def validation(model, batch, mask):
         loss = torch.nn.functional.cross_entropy(yr, br, reduction='mean')
         #print(f'  Validation loss: {loss.item()}')
         #print(tokenizer.decode(batch[0]))
-        return loss.item()
+        return loss.item(), stats
 
 def train(model, slurper, time_s, vbatch, vmask, device, tokenizer):
     opt = torch.optim.Adam(model.parameters(), lr=0.001)
@@ -120,7 +133,7 @@ def train(model, slurper, time_s, vbatch, vmask, device, tokenizer):
     i = 0
     while time.monotonic() - start_time < time_s:
         batch, mask = slurper.batch()
-        y = model(batch,False)
+        y,_ = model(batch,False,False)
         mr = mask[:,1:].reshape(-1)
         yr = y[:,:-1,:].reshape(-1, y.shape[-1])[mr]
         br = batch[:,1:].reshape(-1).long()[mr]
@@ -134,7 +147,7 @@ def train(model, slurper, time_s, vbatch, vmask, device, tokenizer):
             #print(f'Batch {i+1}, loss: {loss_sum.item() / 1000}')
             loss_sum = 0
             #print(tokenizer.decode(batch[0]))
-            vloss = validation(model, vbatch, vmask)
+            vloss, stats = validation(model, vbatch, vmask)
             t = time.monotonic() - start_time
             pred = prediction_to_string(model, tokenizer, vbatch[0,:10])
             print(f'{t}s Batch {i}, loss: {vloss} {pred}')
@@ -143,6 +156,7 @@ def train(model, slurper, time_s, vbatch, vmask, device, tokenizer):
                 'batch': i,
                 'loss': vloss,
                 'predictions': [pred],
+                'stats': stats,
             })
     return results
 
@@ -155,7 +169,7 @@ def predict_slow(model, prompt_tokens, n_tokens, temperature=0):
     prompt = prompt_tokens.reshape(1,-1)
     with torch.no_grad():
         for i in range(n_tokens):
-            y = model(prompt,True)
+            y,_ = model(prompt,True,False)
             if temperature == 0:
                 next_token = torch.argmax(y[0,-1,:]).to(torch.uint16)
             else:
@@ -215,8 +229,9 @@ def main():
                 'd_model': d_model,
                 'd_k': d_k,
                 'd_hidden': d_hidden,
+                'mag': args.mag,
             },
-            'losses': losses
+            'losses': losses,
         }, f, indent=2)
 
 if __name__ == '__main__':

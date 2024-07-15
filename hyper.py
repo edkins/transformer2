@@ -17,10 +17,7 @@ def main():
     parser.add_argument('input_file', type=str)
     os.makedirs('data', exist_ok=True)
     inp = parser.parse_args().input_file
-    run(inp, n_layer=2, mag=0.03)
-    run(inp, n_layer=2, mag=0.05)
-    run(inp, n_layer=2, mag=0.1)
-    run(inp, n_layer=2, mag=0.2)
+    run(inp, n_layer=2)
 
 if __name__ == '__main__':
     main()
