@@ -1,5 +1,7 @@
 import argparse
 import base64
+import json
+import time
 import torch
 from typing import Literal
 
@@ -107,10 +109,13 @@ def validation(model, batch, mask):
         #print(tokenizer.decode(batch[0]))
         return loss.item()
 
-def train(model, slurper, n_batches, vbatch, vmask, device, tokenizer):
+def train(model, slurper, time_s, vbatch, vmask, device, tokenizer):
     opt = torch.optim.Adam(model.parameters(), lr=0.001)
     loss_sum = torch.zeros((), device=device)
-    for i in range(n_batches):
+    start_time = time.monotonic()
+    results = []
+    i = 0
+    while time.monotonic() - start_time < time_s:
         batch, mask = slurper.batch()
         y = model(batch,False)
         mr = mask[:,1:].reshape(-1)
@@ -121,19 +126,26 @@ def train(model, slurper, n_batches, vbatch, vmask, device, tokenizer):
         opt.step()
         opt.zero_grad()
         loss_sum += loss.detach()
-        if (i + 1) % 2500 == 0:
+        i += 1
+        if i % 1000 == 0:
             #print(f'Batch {i+1}, loss: {loss_sum.item() / 1000}')
             loss_sum = 0
             #print(tokenizer.decode(batch[0]))
             vloss = validation(model, vbatch, vmask)
-            print(f'Batch {i+1}, loss: {vloss}')
-            for i in range(min(5,len(vbatch))):
-                print(prediction_to_string(model, tokenizer, vbatch[i,:10]))
-            print()
+            t = time.monotonic() - start_time
+            pred = prediction_to_string(model, tokenizer, vbatch[0,:10])
+            print(f'{t}s Batch {i}, loss: {vloss} {pred}')
+            results.append({
+                'time': t,
+                'batch': i,
+                'loss': vloss,
+                'predictions': [pred],
+            })
+    return results
 
 def prediction_to_string(model, tokenizer, prompt_tokens, n_tokens=30):
     result = predict_slow(model, prompt_tokens, n_tokens, 0.8)
-    return f'{tokenizer.decode(prompt_tokens).replace("\n","\\n")} --> {tokenizer.decode(result).replace("\n","\\n")}'
+    return f'{tokenizer.decode(prompt_tokens).replace("\n","\\n")}-->{tokenizer.decode(result).replace("\n","\\n")}'
 
 def predict_slow(model, prompt_tokens, n_tokens, temperature=0):
     result = torch.zeros(n_tokens, dtype=torch.uint16)
@@ -153,21 +165,27 @@ def predict_slow(model, prompt_tokens, n_tokens, temperature=0):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('input_file', type=str)
+    parser.add_argument('-o', type=str)
+    parser.add_argument('--nlayer', type=int, default=1)
+    parser.add_argument('--nhead', type=int, default=2)
+    parser.add_argument('--dmodel', type=int, default=64)
+    parser.add_argument('--dk', type=int, default=4)
+    parser.add_argument('--dhidden', type=int, default=128)
+    parser.add_argument('--time', type=int, default=300)
     args = parser.parse_args()
     input_filename = args.input_file
     dict_filename = f'{input_filename}.dictionary'
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     tokenizer = Tokenizer(dict_filename)
     
-    n_layer = 1
-    n_head = 2
+    n_layer = args.nlayer
+    n_head = args.nhead
     n_dict = len(tokenizer.tokens)
     n_batch = 1
     n_context = 128
-    d_model = 128
-    d_k = 4
-    d_hidden = 128
-    n_batches = 300_000
+    d_model = args.dmodel
+    d_k = args.dk
+    d_hidden = args.dhidden
 
     torch.manual_seed(12345)
     vslurper = DataSlurper(input_filename, 'validation', device, 64, n_context)
@@ -183,7 +201,19 @@ def main():
     #     y = model(vbatch2)
     #     print(y[:,:,0])
 
-    train(model, slurper, n_batches, vbatch, vmask, device, tokenizer)
+    print(f"Training with n_layer={n_layer}, n_head={n_head}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}")
+    losses = train(model, slurper, args.time, vbatch, vmask, device, tokenizer)
+    with open(args.o, 'w') as f:
+        json.dump({
+            'hyper': {
+                'n_layer': n_layer,
+                'n_head': n_head,
+                'd_model': d_model,
+                'd_k': d_k,
+                'd_hidden': d_hidden,
+            },
+            'losses': losses
+        }, f, indent=2)
 
 if __name__ == '__main__':
     main()
