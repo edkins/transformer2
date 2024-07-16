@@ -171,6 +171,7 @@ def train(model, slurper, time_s, vbatch, vmask, device, tokenizer):
     start_time = time.monotonic()
     results = []
     i = 0
+    target_i = 1000
     while time.monotonic() - start_time < time_s:
         batch, mask = slurper.batch()
         y,_ = model(batch,False,False)
@@ -182,15 +183,15 @@ def train(model, slurper, time_s, vbatch, vmask, device, tokenizer):
         opt.step()
         opt.zero_grad()
         loss_sum += loss.detach()
-        i += 1
-        if i % 1000 == 0:
+        i += len(batch)
+        if i >= target_i:
             #print(f'Batch {i+1}, loss: {loss_sum.item() / 1000}')
             loss_sum = 0
             #print(tokenizer.decode(batch[0]))
             vloss, stats = validation(model, vbatch, vmask)
             t = time.monotonic() - start_time
             pred = prediction_to_string(model, tokenizer, vbatch[0,:10])
-            print(f'{t/60:8.3f} Batch {i}, loss: {vloss} {pred}')
+            print(f'{t/60:8.3f} Data {i}, loss: {vloss} {pred}')
             results.append({
                 'time': t,
                 'batch': i,
@@ -198,6 +199,7 @@ def train(model, slurper, time_s, vbatch, vmask, device, tokenizer):
                 'predictions': [pred],
                 'stats': stats,
             })
+            target_i += 1000
     return results
 
 def prediction_to_string(model, tokenizer, prompt_tokens, n_tokens=30):
@@ -236,6 +238,7 @@ def main():
     parser.add_argument('--layernorm', type=str, default='True')
     parser.add_argument('--enorm', type=str, default='False')
     parser.add_argument('--ldiv', type=float, default=1.0)
+    parser.add_argument('--batch', type=int, default=1)
     args = parser.parse_args()
     input_filename = args.input_file
     dict_filename = f'{input_filename}.dictionary'
@@ -245,7 +248,7 @@ def main():
     n_layer = args.nlayer
     n_head = args.nhead
     n_dict = len(tokenizer.tokens)
-    n_batch = 1
+    n_batch = args.batch
     n_context = 128
     d_model = args.dmodel
     d_k = args.dk
@@ -265,7 +268,7 @@ def main():
     #     y = model(vbatch2)
     #     print(y[:,:,0])
 
-    print(f"Training with time={args.time} n_layer={n_layer}, n_head={n_head}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}, adiv={args.adiv}, pdiv={args.pdiv}, fixedpos={args.fixedpos}, layernorm={args.layernorm}, enorm={args.enorm}, ldiv={args.ldiv}")
+    print(f"Training with time={args.time} n_layer={n_layer}, n_head={n_head}, n_batch={n_batch}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}, adiv={args.adiv}, pdiv={args.pdiv}, fixedpos={args.fixedpos}, layernorm={args.layernorm}, enorm={args.enorm}, ldiv={args.ldiv}")
     losses = train(model, slurper, args.time, vbatch, vmask, device, tokenizer)
     with open(args.o, 'w') as f:
         json.dump({

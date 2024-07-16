@@ -25,7 +25,7 @@ def main():
         losses = dataset['losses']
         if args.kind == 'batch':
             xs = [point['batch'] for point in losses]
-            xlabel = 'batch'
+            xlabel = 'datapoint'
         else:
             xs = [point['time']/60 for point in losses]
             xlabel = 'time (minutes)'
