@@ -62,7 +62,7 @@ def constant(value: float):
     return torch.nn.Parameter(torch.tensor(value, dtype=torch.float32), requires_grad=False)
 
 class TransformerModel(torch.nn.Module):
-    def __init__(self, n_layer: int, n_head: int, n_dict: int, d_model: int, d_k: int, d_hidden: int, n_context: int, mag: float, adiv: float, pdiv: float, fixedpos: Literal['True','False','None','FromZero']):
+    def __init__(self, n_layer: int, n_head: int, n_dict: int, d_model: int, d_k: int, d_hidden: int, n_context: int, mag: float, adiv: float, pdiv: float, fixedpos: Literal['True','False','None','FromZero'], layernorm: Literal['True','False','Affine'], enorm: Literal['True','False','Affine'], ldiv: float):
         super().__init__()
         self.embedding = param(n_dict, d_model, mag=mag)
         if fixedpos == 'True':
@@ -94,9 +94,26 @@ class TransformerModel(torch.nn.Module):
         self.d_k = d_k
         self.amul = constant(1/adiv)
         self.pmul = constant(1/pdiv)
-    
+        self.layernorm = layernorm
+        if layernorm == 'True':
+            self.layernorms0 = torch.nn.ModuleList([torch.nn.LayerNorm(d_model, elementwise_affine=False, bias=False) for _ in range(n_layer)])
+            self.layernorms1 = torch.nn.ModuleList([torch.nn.LayerNorm(d_model, elementwise_affine=False, bias=False) for _ in range(n_layer)])
+        elif layernorm == 'Affine':
+            self.layernorms0 = torch.nn.ModuleList([torch.nn.LayerNorm(d_model) for _ in range(n_layer)])
+            self.layernorms1 = torch.nn.ModuleList([torch.nn.LayerNorm(d_model) for _ in range(n_layer)])
+
+        if enorm == 'True':
+            self.enorms = torch.nn.LayerNorm(d_model, elementwise_affine=False, bias=False)
+        elif enorm == 'Affine':
+            self.enorms = torch.nn.LayerNorm(d_model)
+        self.enorm = enorm
+        self.lmul = constant(1/ldiv)
+
     def forward(self, x: torch.Tensor, last_only: bool, capture_stats: bool) -> tuple[torch.Tensor, list]:
         x = torch.nn.functional.embedding(x.long(), self.embedding) + self.pos_embedding[:, :x.shape[1], :]
+        if self.enorm != 'False':
+            x = self.enorms(x) * self.lmul
+
         if capture_stats:
             stats = [['embed',x.norm().item()]]
         for layer in range(self.n_layer):
@@ -111,6 +128,8 @@ class TransformerModel(torch.nn.Module):
                 attn = attn / (attn.sum(dim=-1, keepdim=True) + 1e-10)
                 vsum = torch.einsum('bhto,bhov->btv', attn, v)
                 x = x + vsum * self.amul
+                if self.layernorm != 'False':
+                    x = self.layernorms0[layer](x) * self.lmul
                 if capture_stats:
                     stats.append([f'vsum{layer}',vsum.norm().item()])
                     stats.append([f'r_mid{layer}',x.norm().item()])
@@ -120,6 +139,8 @@ class TransformerModel(torch.nn.Module):
             y = torch.relu(y + self.mlpb[layer])
             y = torch.einsum('bth,hm->btm', y, self.mlp1[layer])
             x = x + y * self.pmul
+            if self.layernorm != 'False':
+                x = self.layernorms1[layer](x) * self.lmul
             if capture_stats:
                 stats.append([f'y{layer}',y.norm().item()])
                 stats.append([f'r_end{layer}',x.norm().item()])
@@ -169,7 +190,7 @@ def train(model, slurper, time_s, vbatch, vmask, device, tokenizer):
             vloss, stats = validation(model, vbatch, vmask)
             t = time.monotonic() - start_time
             pred = prediction_to_string(model, tokenizer, vbatch[0,:10])
-            print(f'{t/60} Batch {i}, loss: {vloss} {pred}')
+            print(f'{t/60:8.3f} Batch {i}, loss: {vloss} {pred}')
             results.append({
                 'time': t,
                 'batch': i,
@@ -212,6 +233,9 @@ def main():
     parser.add_argument('--adiv', type=float, default=1.0)
     parser.add_argument('--pdiv', type=float, default=1.0)
     parser.add_argument('--fixedpos', type=str, default='False')
+    parser.add_argument('--layernorm', type=str, default='True')
+    parser.add_argument('--enorm', type=str, default='False')
+    parser.add_argument('--ldiv', type=float, default=1.0)
     args = parser.parse_args()
     input_filename = args.input_file
     dict_filename = f'{input_filename}.dictionary'
@@ -232,7 +256,7 @@ def main():
     slurper = DataSlurper(input_filename, 'train', device, n_batch, n_context)
     vbatch, vmask = vslurper.batch()
 
-    model = TransformerModel(n_layer, n_head, n_dict, d_model, d_k, d_hidden, n_context, args.mag, args.adiv, args.pdiv, args.fixedpos).to(device)
+    model = TransformerModel(n_layer, n_head, n_dict, d_model, d_k, d_hidden, n_context, args.mag, args.adiv, args.pdiv, args.fixedpos, args.layernorm, args.enorm, args.ldiv).to(device)
 
     # with torch.no_grad():
     #     vbatch2 = torch.stack([vbatch[0]] * 2)
@@ -241,7 +265,7 @@ def main():
     #     y = model(vbatch2)
     #     print(y[:,:,0])
 
-    print(f"Training with time={args.time} n_layer={n_layer}, n_head={n_head}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}, adiv={args.adiv}, pdiv={args.pdiv}, fixedpos={args.fixedpos}")
+    print(f"Training with time={args.time} n_layer={n_layer}, n_head={n_head}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}, adiv={args.adiv}, pdiv={args.pdiv}, fixedpos={args.fixedpos}, layernorm={args.layernorm}, enorm={args.enorm}, ldiv={args.ldiv}")
     losses = train(model, slurper, args.time, vbatch, vmask, device, tokenizer)
     with open(args.o, 'w') as f:
         json.dump({
@@ -255,6 +279,9 @@ def main():
                 'adiv': args.adiv,
                 'pdiv': args.pdiv,
                 'fixedpos': args.fixedpos,
+                'layernorm': args.layernorm,
+                'enorm': args.enorm,
+                'ldiv': args.ldiv,
             },
             'losses': losses,
         }, f, indent=2)
