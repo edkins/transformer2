@@ -1,6 +1,7 @@
 import argparse
 import base64
 import json
+import math
 import time
 import torch
 from typing import Literal
@@ -54,6 +55,25 @@ class Tokenizer:
         if len(tensor.shape) != 1:
             raise ValueError('Expected a 1D tensor')
         return b''.join(self.tokens[t] for t in tensor).decode('utf-8', errors='replace')
+    
+    def encode_slow(self, string: str, prepend_sep=True) -> torch.Tensor:
+        string = string.encode('utf-8')
+        remaining = string
+        result = []
+        if prepend_sep:
+            result = [0]
+        while remaining != b'':
+            best = b''
+            best_i = -1
+            for i,token in enumerate(self.tokens):
+                if i == 0:
+                    continue
+                if remaining.startswith(token) and len(token) > len(best):
+                    best = token
+                    best_i = i
+            result.append(best_i)
+            remaining = remaining[len(best):]
+        return torch.tensor(result, dtype=torch.uint16)
 
 def param(*size, mag=0.05):
     return torch.nn.Parameter(torch.randn(size, dtype=torch.float32) * mag)
@@ -165,7 +185,7 @@ def validation(model, batch, mask):
         #print(tokenizer.decode(batch[0]))
         return loss.item(), stats
 
-def train(model, slurper, time_s, vbatch, vmask, device, tokenizer):
+def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, vcmask, vcbits):
     opt = torch.optim.Adam(model.parameters(), lr=0.001)
     loss_sum = torch.zeros((), device=device)
     start_time = time.monotonic()
@@ -189,18 +209,38 @@ def train(model, slurper, time_s, vbatch, vmask, device, tokenizer):
             loss_sum = 0
             #print(tokenizer.decode(batch[0]))
             vloss, stats = validation(model, vbatch, vmask)
+            vratio = compression_ratio(model, vcompress, vcmask, vcbits)
             t = time.monotonic() - start_time
             pred = prediction_to_string(model, tokenizer, vbatch[0,:10])
-            print(f'{t/60:8.3f} Data {i}, loss: {vloss} {pred}')
+            print(f'{t/60:8.3f} {i:7d}, loss: {vloss:6.4f} ratio: {vratio:6.4f} {pred}')
             results.append({
                 'time': t,
                 'batch': i,
                 'loss': vloss,
+                'ratio': vratio,
                 'predictions': [pred],
                 'stats': stats,
             })
             target_i += 1000
     return results
+
+def compression_ratio(model: TransformerModel, vbatch: torch.Tensor, vmask: torch.Tensor, vbits: int) -> float:
+    """
+    Find the negative base2-log likelihood of the model outputting vbatch (where some of the entries are irrelevant -
+    those are masked out by vmask).
+
+    Then divide by the number of bits in the target, to get a compression ratio.
+    """
+    with torch.no_grad():
+        y,_ = model(vbatch,False,False)
+        mr = vmask[:,1:].reshape(-1)
+        logprobs = torch.nn.functional.log_softmax(y, dim=-1) / math.log(2)
+        #lpr = torch.nn.functional.embedding(vbatch.long(), logprobs)
+        lpr = logprobs[:,:-1,:].reshape(-1, logprobs.shape[-1])[mr]
+        br = vbatch[:,1:].reshape(-1).long()[mr]
+        width = lpr.shape[0]
+        size = -torch.sum(lpr[torch.arange(0, width), br])
+        return (size / vbits).item()
 
 def prediction_to_string(model, tokenizer, prompt_tokens, n_tokens=30):
     result = predict_slow(model, prompt_tokens, n_tokens, 0.8)
@@ -221,6 +261,36 @@ def predict_slow(model, prompt_tokens, n_tokens, temperature=0):
             result[i] = next_token
         return result
 
+def gen_compress(vbatch, vmask, tokenizer, filename_base) -> list[str]:
+    tokenlen = vbatch.shape[1]//2
+    strings = []
+    with torch.no_grad():
+        for i in range(len(vbatch)):
+            tlen = min(tokenlen, vmask[i,:].sum()-1)
+            string = tokenizer.decode(vbatch[i,1:tlen])
+            if len(string) > 25:
+                strings.append(string)
+    with open(f'{filename_base}.validation.compress','w') as f:
+        json.dump(strings, f, indent=2)
+
+def load_compress(filename_base: str, tokenizer: Tokenizer, width: int, device: str) -> tuple[torch.Tensor, torch.Tensor, int]:
+    with open(f'{filename_base}.validation.compress') as f:
+        strings = json.load(f)
+        return tokenize_compress(strings, tokenizer, width, device)
+
+def tokenize_compress(strings: list[str], tokenizer: Tokenizer, width: int, device: str) -> tuple[torch.Tensor, torch.Tensor, int]:
+    result = torch.zeros((len(strings), width), dtype=torch.uint16)
+    rmask = torch.zeros((len(strings), width), dtype=bool)
+    rbits = 0
+    for i,string in enumerate(strings):
+        toks = tokenizer.encode_slow(string)
+        if len(toks) > width:
+            raise Exception("tokenize_compress: width is not enough")
+        result[i, :len(toks)] = toks
+        rmask[i, :len(toks)] = True
+        rbits += len(string) * 8
+    return result.to(device), rmask.to(device), rbits
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('input_file', type=str)
@@ -239,6 +309,7 @@ def main():
     parser.add_argument('--enorm', type=str, default='False')
     parser.add_argument('--ldiv', type=float, default=1.0)
     parser.add_argument('--batch', type=int, default=1)
+    parser.add_argument('--gencompress', action='store_true')
     args = parser.parse_args()
     input_filename = args.input_file
     dict_filename = f'{input_filename}.dictionary'
@@ -259,6 +330,10 @@ def main():
     slurper = DataSlurper(input_filename, 'train', device, n_batch, n_context)
     vbatch, vmask = vslurper.batch()
 
+    if args.gencompress:
+        gen_compress(vbatch, vmask, tokenizer, input_filename)
+    vcompress, vcmask, vbits = load_compress(input_filename, tokenizer, n_context, device)
+
     model = TransformerModel(n_layer, n_head, n_dict, d_model, d_k, d_hidden, n_context, args.mag, args.adiv, args.pdiv, args.fixedpos, args.layernorm, args.enorm, args.ldiv).to(device)
 
     # with torch.no_grad():
@@ -269,7 +344,7 @@ def main():
     #     print(y[:,:,0])
 
     print(f"Training with time={args.time} n_layer={n_layer}, n_head={n_head}, n_batch={n_batch}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}, adiv={args.adiv}, pdiv={args.pdiv}, fixedpos={args.fixedpos}, layernorm={args.layernorm}, enorm={args.enorm}, ldiv={args.ldiv}")
-    losses = train(model, slurper, args.time, vbatch, vmask, device, tokenizer)
+    losses = train(model, slurper, args.time, vbatch, vmask, device, tokenizer, vcompress, vcmask, vbits)
     with open(args.o, 'w') as f:
         json.dump({
             'hyper': {

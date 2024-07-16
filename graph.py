@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('kind', type=str, choices=['time','batch'])
+    parser.add_argument('kind', type=str, choices=['time','data','ratio','ratiodata'])
     args = parser.parse_args()
     with os.scandir('data') as it:
         data = []
@@ -23,15 +23,21 @@ def main():
     fig = go.Figure()
     for i, dataset in enumerate(data):
         losses = dataset['losses']
-        if args.kind == 'batch':
+        if args.kind in ['data','ratiodata']:
             xs = [point['batch'] for point in losses]
             xlabel = 'datapoint'
         else:
             xs = [point['time']/60 for point in losses]
             xlabel = 'time (minutes)'
-        ys = [point['loss'] for point in losses]
+
+        if args.kind in ['ratio','ratiodata']:
+            ys = [point['ratio'] for point in losses]
+            yaxis_title = 'compression ratio'
+        else:
+            ys = [point['loss'] for point in losses]
+            yaxis_title = 'loss'
         fig.add_trace(go.Scatter(x=xs, y=ys, mode='lines', name=dataset['filename'])) #, line=dict(color=colors[i])))
-    fig.update_layout(xaxis_title=xlabel, yaxis_title='loss')
+    fig.update_layout(xaxis_title=xlabel, yaxis_title=yaxis_title)
     fig.show()
 
 if __name__ == '__main__':

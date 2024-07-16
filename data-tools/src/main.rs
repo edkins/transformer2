@@ -36,6 +36,8 @@ enum Command {
         filename: String,
         #[clap(short = 'o')]
         out_filename: String,
+        #[clap(short = 'n')]
+        n_tokens: usize,
     },
     Tokenize {
         filename: String,
@@ -70,7 +72,8 @@ fn main() {
         Command::Dictionary {
             filename,
             out_filename,
-        } => dictionary(&filename, &out_filename),
+            n_tokens,
+        } => dictionary(&filename, &out_filename, n_tokens),
         Command::Tokenize {
             filename,
             dict_filename,
@@ -163,7 +166,7 @@ fn print_dict(dict_filename: &str) {
     }
 }
 
-fn dictionary(filename: &str, out_filename: &str) {
+fn dictionary(filename: &str, out_filename: &str, n_tokens: usize) {
     let in_file = progress_read_input(filename);
     process_xml::ArticleReader::new(in_file)
         .par_bridge()
@@ -171,7 +174,7 @@ fn dictionary(filename: &str, out_filename: &str) {
         .map(Article::strip_wikitext)
         .flat_map_iter(|a| split_words::split_words(a.text))
         .collect::<WordCounter>()
-        .into_bpe()
+        .into_bpe(n_tokens)
         .write_to_file(out_filename);
 }
 

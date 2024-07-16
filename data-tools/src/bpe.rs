@@ -7,8 +7,6 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 
 type Token = u32;
 
-const NUM_TOKENS_TO_GENERATE: usize = 16383;
-
 struct PairCounter {
     map: HashMap<(Token, Token), (i64, Vec<usize>)>,
     set: BTreeSet<(i64, (Token, Token))>,
@@ -84,14 +82,16 @@ pub struct Bpe {
     words: Vec<(Vec<Token>, u64)>,
     token_vocab: Vec<Vec<u8>>,
     pairs: PairCounter,
+    n_tokens: usize,
 }
 
 impl Bpe {
-    pub fn new_and_run(words: Vec<(Vec<Token>, u64)>) -> Self {
+    pub fn new_and_run(words: Vec<(Vec<Token>, u64)>, n_tokens: usize) -> Self {
         let mut result = Bpe {
             token_vocab: (0..=255).map(|x| [x].to_vec()).collect(),
             pairs: PairCounter::new_from_words(&words),
             words,
+            n_tokens,
         };
 
         result.run();
@@ -133,7 +133,7 @@ impl Bpe {
     }
 
     pub fn run(&mut self) {
-        while self.token_vocab.len() < NUM_TOKENS_TO_GENERATE {
+        while self.token_vocab.len() < self.n_tokens - 1 {
             self.step();
             if self.token_vocab.len() % 100 == 0 {
                 println!("Dictionary size: {}", self.token_vocab.len());
