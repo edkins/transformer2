@@ -62,18 +62,24 @@ def constant(value: float):
     return torch.nn.Parameter(torch.tensor(value, dtype=torch.float32), requires_grad=False)
 
 class TransformerModel(torch.nn.Module):
-    def __init__(self, n_layer: int, n_head: int, n_dict: int, d_model: int, d_k: int, d_hidden: int, n_context: int, mag: float, adiv: float, pdiv: float, fixedpos: bool):
+    def __init__(self, n_layer: int, n_head: int, n_dict: int, d_model: int, d_k: int, d_hidden: int, n_context: int, mag: float, adiv: float, pdiv: float, fixedpos: Literal['True','False','None','FromZero']):
         super().__init__()
         self.embedding = param(n_dict, d_model, mag=mag)
-        if fixedpos:
-            pos_embedding = torch.zeros(n_context, d_model)
+        if fixedpos == 'True':
+            pos_embedding = torch.zeros(1, n_context, d_model)
             # d_model must be even for this
             for i2 in range(0,d_model,2):
-                pos_embedding[:,i2] = torch.sin(torch.arange(n_context, dtype=torch.float32) / 10000**(i2/d_model))
-                pos_embedding[:,i2+1] = torch.cos(torch.arange(n_context, dtype=torch.float32) / 10000**(i2/d_model))
+                pos_embedding[0,:,i2] = torch.sin(torch.arange(n_context, dtype=torch.float32) / (10000**(i2/d_model)))
+                pos_embedding[0,:,i2+1] = torch.cos(torch.arange(n_context, dtype=torch.float32) / (10000**(i2/d_model)))
             self.pos_embedding = torch.nn.Parameter(pos_embedding, requires_grad=False)
-        else:
+        elif fixedpos == 'False':
             self.pos_embedding = param(1, n_context, d_model, mag=mag)
+        elif fixedpos == 'None':
+            pos_embedding = torch.zeros(1, n_context, d_model)
+            self.pos_embedding = torch.nn.Parameter(pos_embedding, requires_grad=False)
+        elif fixedpos == 'FromZero':
+            pos_embedding = torch.zeros(1, n_context, d_model)
+            self.pos_embedding = torch.nn.Parameter(pos_embedding)
         if d_k > 0:
             self.wq = param(n_layer, n_head, d_model, d_k, mag=mag)
             self.wk = param(n_layer, n_head, d_model, d_k, mag=mag)
@@ -205,7 +211,7 @@ def main():
     parser.add_argument('--mag', type=float, default=0.05)
     parser.add_argument('--adiv', type=float, default=1.0)
     parser.add_argument('--pdiv', type=float, default=1.0)
-    parser.add_argument('--fixedpos', type=bool, default=False)
+    parser.add_argument('--fixedpos', type=str, default='False')
     args = parser.parse_args()
     input_filename = args.input_file
     dict_filename = f'{input_filename}.dictionary'
