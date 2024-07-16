@@ -169,7 +169,7 @@ def train(model, slurper, time_s, vbatch, vmask, device, tokenizer):
             vloss, stats = validation(model, vbatch, vmask)
             t = time.monotonic() - start_time
             pred = prediction_to_string(model, tokenizer, vbatch[0,:10])
-            print(f'{t}s Batch {i}, loss: {vloss} {pred}')
+            print(f'{t/60} Batch {i}, loss: {vloss} {pred}')
             results.append({
                 'time': t,
                 'batch': i,
@@ -241,7 +241,7 @@ def main():
     #     y = model(vbatch2)
     #     print(y[:,:,0])
 
-    print(f"Training with n_layer={n_layer}, n_head={n_head}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}, adiv={args.adiv}, pdiv={args.pdiv}, fixedpos={args.fixedpos}")
+    print(f"Training with time={args.time} n_layer={n_layer}, n_head={n_head}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}, adiv={args.adiv}, pdiv={args.pdiv}, fixedpos={args.fixedpos}")
     losses = train(model, slurper, args.time, vbatch, vmask, device, tokenizer)
     with open(args.o, 'w') as f:
         json.dump({

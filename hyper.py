@@ -2,7 +2,7 @@ import argparse
 import os
 import subprocess
 
-def run(input_file: str, n_layer=1, n_head=4, d_model=128, d_k=4, d_hidden=128, time_s=300, mag=0.125, adiv=10, pdiv=10, fixedpos='False'):
+def run(input_file: str, n_layer=1, n_head=4, d_model=128, d_k=4, d_hidden=128, time_s=300, mag=0.125, adiv=10, pdiv=10, fixedpos='FromZero'):
     output_file = f'data/l{n_layer}_h{n_head}_d{d_model}_k{d_k}_h{d_hidden}_ad{adiv}_pd{pdiv}'
     if mag != 0.125:
         output_file += f'_m{mag}'
@@ -23,6 +23,8 @@ def main():
     parser.add_argument('input_file', type=str)
     os.makedirs('data', exist_ok=True)
     inp = parser.parse_args().input_file
+    run(inp, time_s=1200)
+    run(inp, time_s=1200, n_layer=2)
     # run(inp, n_layer=1, fixedpos='True')
     # run(inp, n_layer=1)
     # run(inp, n_layer=1, fixedpos='None')
@@ -30,7 +32,7 @@ def main():
     # run(inp, n_layer=2, fixedpos='True')
     # run(inp, n_layer=2, fixedpos='FromZero')
     # run(inp, n_layer=2)
-    run(inp, n_layer=3, fixedpos='FromZero')
+    #run(inp, n_layer=3, fixedpos='FromZero')
     #run(inp, n_layer=2)
     #run(inp, n_layer=1, mag=0.125)
     #run(inp, n_layer=1, adiv=10, pdiv=10, mag=0.125)

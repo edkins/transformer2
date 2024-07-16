@@ -25,11 +25,13 @@ def main():
         losses = dataset['losses']
         if args.kind == 'batch':
             xs = [point['batch'] for point in losses]
+            xlabel = 'batch'
         else:
-            xs = [point['time'] for point in losses]
+            xs = [point['time']/60 for point in losses]
+            xlabel = 'time (minutes)'
         ys = [point['loss'] for point in losses]
         fig.add_trace(go.Scatter(x=xs, y=ys, mode='lines', name=dataset['filename'])) #, line=dict(color=colors[i])))
-    fig.update_layout(xaxis_title=args.kind, yaxis_title='loss')
+    fig.update_layout(xaxis_title=xlabel, yaxis_title='loss')
     fig.show()
 
 if __name__ == '__main__':
