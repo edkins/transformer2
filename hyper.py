@@ -58,7 +58,7 @@ def main():
     print(inp0)
     #print(inp1)
     #print(inp2)
-    run(inp0, time_s=300, n_layer=4)
+    run(inp0, time_s=300, n_layer=2)
 
 if __name__ == '__main__':
     main()

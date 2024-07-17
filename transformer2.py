@@ -441,7 +441,7 @@ def main():
     args = parser.parse_args()
     input_filename = args.input_file
     dict_filename = f'{input_filename}.dictionary'
-    if torch.cuda.is_available() and args.command in ['slurp-in', 'train', 'mmap']:
+    if torch.cuda.is_available() and args.command in ['slurp-in', 'train', 'mmap', 'mem']:
         device = 'cuda'
     else:
         device = 'cpu'
