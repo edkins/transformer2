@@ -3,7 +3,7 @@ import os
 import pathlib
 import subprocess
 
-def run(input_file: str, n_layer=2, n_head=4, d_model=128, d_k=4, d_hidden=128, time_s=300, mag=0.125, adiv=10, pdiv=10, fixedpos='FromZero', layernorm='Affine', enorm='False', ldiv=3, n_batch=4, gamma=0, epoch=10000):
+def run(input_file: str, n_layer=2, n_head=4, d_model=128, d_k=4, d_hidden=128, time_s=300, mag=0.125, adiv=10, pdiv=10, fixedpos='FromZero', layernorm='Affine', enorm='False', ldiv=3, n_batch=64, gamma=0, epoch=10000):
     output_file = f'data/'
     if input_file.endswith('t4k'):
         output_file += '4k_'
