@@ -99,7 +99,8 @@ class MemSlurper:
             result = torch.zeros((self.n_batch, self.n_context), dtype=torch.int16, device=self.device)
             for i in range(self.n_batch):
                 result[i,1:1+ends[i]-starts[i]] = self.data[starts[i]:ends[i]]
-            result_mask = (result != 0)
+            result_mask = torch.zeros((self.n_batch, self.n_context), dtype=bool, device=self.device)
+            result_mask[:,1:] = (result[:,-1] != 0)
             result_mask[:,0] = True
             return result, result_mask
 
