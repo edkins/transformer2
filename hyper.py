@@ -1,8 +1,9 @@
 import argparse
 import os
+import pathlib
 import subprocess
 
-def run(input_file: str, n_layer=2, n_head=4, d_model=128, d_k=4, d_hidden=128, time_s=300, mag=0.125, adiv=10, pdiv=10, fixedpos='FromZero', layernorm='False', enorm='False', ldiv=3, n_batch=4):
+def run(input_file: str, n_layer=2, n_head=4, d_model=128, d_k=4, d_hidden=128, time_s=300, mag=0.125, adiv=10, pdiv=10, fixedpos='FromZero', layernorm='Affine', enorm='False', ldiv=3, n_batch=4):
     output_file = f'data/'
     if input_file.endswith('t4k'):
         output_file += '4k_'
@@ -10,6 +11,10 @@ def run(input_file: str, n_layer=2, n_head=4, d_model=128, d_k=4, d_hidden=128, 
         output_file += '8k_'
     elif input_file.endswith('t12k'):
         output_file += '12k_'
+    elif input_file.endswith('tokenized') or input_file.endswith('t16k'):
+        output_file += '16k_'
+    elif input_file.endswith('t24k'):
+        output_file += '24k_'
     elif input_file.endswith('t32k'):
         output_file += '32k_'
     output_file += f'l{n_layer}_h{n_head}_d{d_model}_k{d_k}_h{d_hidden}_ad{adiv}_pd{pdiv}'
@@ -41,10 +46,20 @@ def run(input_file: str, n_layer=2, n_head=4, d_model=128, d_k=4, d_hidden=128, 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('input_file', type=str)
+    parser.add_argument('directory', type=str)
     os.makedirs('data', exist_ok=True)
-    inp = parser.parse_args().input_file
-    run(inp, time_s=300, n_layer=2, layernorm='Affine', ldiv=3, n_batch=4)
+    inp0 = str(pathlib.Path(parser.parse_args().directory, 'tokenized'))
+    inp1 = str(pathlib.Path(parser.parse_args().directory, 't32k'))
+    inp2 = str(pathlib.Path(parser.parse_args().directory, 't24k'))
+    print(inp0)
+    print(inp1)
+    print(inp2)
+    run(inp0, time_s=1800, n_layer=2)
+    run(inp1, time_s=1800, n_layer=2)
+    run(inp2, time_s=1800, n_layer=2)
+    run(inp0, time_s=1800, n_layer=3)
+    run(inp1, time_s=1800, n_layer=3)
+    run(inp2, time_s=1800, n_layer=3)
     #run(inp, time_s=300, n_layer=2, layernorm='Affine', ldiv=3, n_batch=4, d_model=64)
     #run(inp, time_s=300, n_layer=2, layernorm='Affine', ldiv=3, n_batch=4, d_model=512, d_hidden=512)
     #run(inp, time_s=300, n_layer=2, layernorm='Affine', ldiv=3, n_batch=4, d_model=64, d_hidden=64)
