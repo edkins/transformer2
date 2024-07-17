@@ -10,8 +10,10 @@ use clap::{Parser, Subcommand};
 use process_xml::Article;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 
+use rejoin_numbered_articles::Rejoiner;
 use serde::Deserialize;
-use tokenize::{write_condensed, ArticleMetadata, TokenizedArticle, TokenizerOutput};
+use split_tokenized_articles::SplitTokenizedArticles;
+use tokenize::{write_condensed, ArticleMetadata, TokenizerOutput};
 use train_test_split::Split;
 use word_counter::WordCounter;
 
@@ -20,6 +22,8 @@ mod little_endian;
 mod process_wikitext;
 mod process_xml;
 mod progress_reader;
+mod rejoin_numbered_articles;
+mod split_tokenized_articles;
 mod split_words;
 mod tokenize;
 mod train_test_split;
@@ -67,6 +71,8 @@ enum Command {
         filename: String,
         #[clap(short = 'o')]
         out_filename: String,
+        #[clap(short = 'p', default_value = "16")]
+        parallelism: usize,
     },
 }
 
@@ -93,7 +99,7 @@ fn main() {
         } => cat(&filename, &dict_filename),
         Command::Condense { filename } => condense(&filename),
         Command::Clean { filename } => clean(&filename),
-        Command::Retokenize { filename, out_filename } => retokenize(&filename, &out_filename),
+        Command::Retokenize { filename, out_filename, parallelism } => retokenize(&filename, &out_filename, parallelism),
     }
 
     println!("Elapsed time: {:?}", time.elapsed());
@@ -106,7 +112,7 @@ struct AllMetadataIn {
     test: Vec<ArticleMetadata>,
 }
 
-fn retokenize(filename: &str, out_filename: &str) {
+fn retokenize(filename: &str, out_filename: &str, parallelism: usize) {
     let dictionary = BufReader::new(File::open(format!("{}.dictionary", filename)).unwrap());
     let dictionary = std::iter::once(b"[--SEP--]".to_vec())
         .chain(
@@ -116,35 +122,39 @@ fn retokenize(filename: &str, out_filename: &str) {
         )
         .collect::<Vec<_>>();
 
-    let mut tokenizer = tokenize::Tokenizer::default();
-    tokenizer.initialize(&format!("{}.dictionary", out_filename));
-    
-    let mut output = TokenizerOutput::create(out_filename);
-    for split_enum in [Split::Train, Split::Validation, Split::Test] {
-        let split = split_enum.to_str();
-        println!("Processing split {}", split);
-        let mut in_file = progress_read_input(&format!("{}.{}", filename, split));
-        let mut article_in = Vec::new();
-        while let Ok(tok) = in_file.read_u16::<byteorder::LittleEndian>() {
-            if tok != 0 {
-                article_in.extend_from_slice(&dictionary[tok as usize]);
-                continue;
-            }
-            let mut article_out = Vec::new();
-            let mut new_article = Vec::new();
-            std::mem::swap(&mut article_in, &mut new_article);
-            for word in split_words::split_words(String::from_utf8(new_article).expect("utf-8 error")) {
-                article_out.extend_from_slice(tokenizer.tokenize_word(word));
-            }
-            article_out.push(0);
-            output.write_article(TokenizedArticle {
-                url: String::new(),  // TODO: this shouldn't really be here. It gets ignored by the later stages
-                split: split_enum,
-                tokens: article_out,
-            });
+    let output = TokenizerOutput::create(out_filename);
+    let output = Mutex::new(Rejoiner::new(output));
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(parallelism)
+        .build()
+        .expect("Unable to create thread pool");
+    pool.install(move || {
+        for split_enum in [Split::Train, Split::Validation, Split::Test] {
+            let split = split_enum.to_str();
+            println!("Processing split {}", split);
+            let in_file = progress_read_input(&format!("{}.{}", filename, split));
+
+            SplitTokenizedArticles::new(in_file, dictionary.clone())
+                .enumerate()
+                .par_bridge()
+                .map(|(i,article)| {
+                    TOKENIZER.with(|tokenizer| {
+                        let mut article_out = Vec::new();
+                        let mut t = tokenizer.borrow_mut();
+                        t.initialize(&format!("{}.dictionary", out_filename));
+                        for word in split_words::split_words(article) {
+                            article_out.extend_from_slice(t.tokenize_word(word));
+                        }
+                        article_out.push(0);
+                        (i, article_out)
+                    })
+                })
+                .for_each(|(i,article)| {
+                    output.lock().expect("Poisoned").add(i, article, split_enum);
+                });
         }
-    };
-    output.write_metadata();
+        output.into_inner().expect("Poisoned").finish();
+    });
 }
 
 fn clean(filename: &str) {

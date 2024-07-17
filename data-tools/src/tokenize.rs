@@ -23,13 +23,15 @@ pub struct Tokenizer {
 
 impl Tokenizer {
     pub fn initialize(&mut self, filename: &str) {
-        let dictionary = std::fs::File::open(filename).unwrap();
-        for (i, word) in BufReader::new(dictionary)
-            .lines()
-            .map(|line| BASE64_STANDARD.decode(line.unwrap()).unwrap())
-            .enumerate()
-        {
-            self.cache.insert(word.clone(), vec![(i + 1) as Token]);
+        if self.cache.is_empty() {
+            let dictionary = std::fs::File::open(filename).unwrap();
+            for (i, word) in BufReader::new(dictionary)
+                .lines()
+                .map(|line| BASE64_STANDARD.decode(line.unwrap()).unwrap())
+                .enumerate()
+            {
+                self.cache.insert(word.clone(), vec![(i + 1) as Token]);
+            }
         }
     }
 
@@ -91,9 +93,7 @@ impl Tokenizer {
         filename: &str,
         article: Article,
     ) -> TokenizedArticle {
-        if self.cache.is_empty() {
-            self.initialize(filename);
-        }
+        self.initialize(filename);
         let mut tokens = Vec::new();
         for word in SplitWords::new(article.text) {
             tokens.extend(self.tokenize_word(word).iter().cloned());
