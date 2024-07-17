@@ -2,6 +2,8 @@ import argparse
 import base64
 import json
 import math
+import mmap
+import os
 import sys
 import time
 import torch
@@ -23,6 +25,9 @@ class StdinSlurper:
             mask = batch != 0
             mask[0,:] = True
             return batch, mask
+        
+    def close(self):
+        pass
 
 class StdoutWriter:
     def __init__(self):
@@ -30,6 +35,40 @@ class StdoutWriter:
 
     def write(self, tensor: torch.Tensor):
         sys.stdout.buffer.write(tensor.cpu().numpy().tobytes())
+
+class MMappedSlurper:
+    def __init__(self, filename_base: str, split: Literal['train','validation','test'], device: str, n_batch: int, n_context: int):
+        self.split = split
+        self.fileno = os.open(f'{filename_base}.{split}', os.O_RDONLY)
+        self.mmap = mmap.mmap(self.fileno, 0, mmap.MAP_SHARED, mmap.PROT_READ)
+        self.device = device
+        self.n_batch = n_batch
+        self.n_context = n_context
+        with open(f'{filename_base}.metadata.{split}','rb') as f:
+            buffer = f.read()
+            self.metadata = torch.frombuffer(buffer, dtype=torch.int64).reshape(-1,2)
+    
+    def _pick_articles(self, n: int) -> torch.Tensor:
+        indices = torch.randint(0, len(self.metadata), (n,))
+        return self.metadata[indices]
+
+    def batch(self) -> tuple[torch.Tensor, torch.Tensor]:
+        with torch.no_grad():
+            byte_length = 2 * (self.n_context - 1)
+            articles = self._pick_articles(self.n_batch)
+            result = torch.zeros((self.n_batch, self.n_context), dtype=torch.int16)
+            result_mask = torch.zeros((self.n_batch, self.n_context), dtype=bool)
+            for i,[start,token_end] in enumerate(articles):
+                end = min(token_end, start + byte_length)
+                read_bytes = self.mmap[start:end]
+                read_tensor = torch.frombuffer(read_bytes, dtype=torch.int16)
+                result[i,1:1+len(read_tensor)] = read_tensor
+                result_mask[i,:1+len(read_tensor)] = True
+            return result.to(self.device), result_mask.to(self.device)
+
+    def close(self):
+        self.mmap.close()
+        os.close(self.fileno)
 
 class DataSlurper:
     def __init__(self, filename_base: str, split: Literal['train','validation','test'], device: str, n_batch: int, n_context: int):
@@ -68,6 +107,9 @@ class DataSlurper:
                 result[i,1:1+len(read_tensor)] = read_tensor
                 result_mask[i,:1+len(read_tensor)] = True
             return result.to(self.device), result_mask.to(self.device)
+        
+    def close(self):
+        self.file.close()
 
 class Tokenizer:
     def __init__(self, dict_filename: str):
@@ -362,7 +404,7 @@ def main():
     args = parser.parse_args()
     input_filename = args.input_file
     dict_filename = f'{input_filename}.dictionary'
-    if torch.cuda.is_available() and args.command in ['slurp-in', 'train']:
+    if torch.cuda.is_available() and args.command in ['slurp-in', 'train', 'mmap']:
         device = 'cuda'
     else:
         device = 'cpu'
@@ -378,7 +420,7 @@ def main():
     d_hidden = args.dhidden
 
     torch.manual_seed(12345)
-    if args.command in ['slurp-in', 'train']:
+    if args.command in ['slurp-in', 'train', 'mmap']:
         vslurper = DataSlurper(input_filename, 'validation', device, 64, n_context)
         vbatch, vmask = vslurper.batch()
         if args.gencompress:
@@ -388,6 +430,8 @@ def main():
 
     if args.command in ['slurp-out', 'train']:
         slurper = DataSlurper(input_filename, 'train', device, n_batch, n_context)
+    elif args.command == 'mmap':
+        slurper = MMappedSlurper(input_filename, 'train', device, n_batch, n_context)
     elif args.command == 'slurp-in':
         slurper = StdinSlurper(device, n_batch, n_context)
 
@@ -436,6 +480,7 @@ def main():
             'losses': losses,
             'final_predictions': predictions,
         }, f, indent=2)
+    slurper.close()
 
 if __name__ == '__main__':
     main()
