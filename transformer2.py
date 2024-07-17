@@ -24,7 +24,7 @@ class DataSlurper:
 
     def batch(self) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Returns a uint16 tensor of shape (n, length) containing the first `length` tokens of `n` random articles from the specified split.
+        Returns an int16 tensor of shape (n, length) containing the first `length` tokens of `n` random articles from the specified split.
         Each row will start with a zero byte which is the beginning-of-sequence token.
 
         Also returns a bool tensor of shape (n, length) containing the part of the tensor that is actually filled with data.
@@ -33,7 +33,7 @@ class DataSlurper:
         with torch.no_grad():
             byte_length = 2 * (self.n_context - 1)
             articles = self._pick_articles(self.n_batch)
-            result = torch.zeros((self.n_batch, self.n_context), dtype=torch.uint16)
+            result = torch.zeros((self.n_batch, self.n_context), dtype=torch.int16)
             result_mask = torch.zeros((self.n_batch, self.n_context), dtype=bool)
             for i,[start,token_end] in enumerate(articles):
                 end = min(token_end, start + byte_length)
@@ -73,7 +73,7 @@ class Tokenizer:
                     best_i = i
             result.append(best_i)
             remaining = remaining[len(best):]
-        return torch.tensor(result, dtype=torch.uint16)
+        return torch.tensor(result, dtype=torch.int16)
 
 def param(*size, mag=0.05):
     return torch.nn.Parameter(torch.randn(size, dtype=torch.float32) * mag)
@@ -260,16 +260,16 @@ def prediction_to_string(model, tokenizer, prompt_tokens, n_tokens=30, temperatu
     return f'{left}-->{right}'
 
 def predict_slow(model, prompt_tokens, n_tokens, temperature=0):
-    result = torch.zeros(n_tokens, dtype=torch.uint16)
+    result = torch.zeros(n_tokens, dtype=torch.int16)
     prompt = prompt_tokens.reshape(1,-1)
     with torch.no_grad():
         for i in range(n_tokens):
             y,_ = model(prompt,True,False)
             if temperature == 0:
-                next_token = torch.argmax(y[0,-1,:]).to(torch.uint16)
+                next_token = torch.argmax(y[0,-1,:]).to(torch.int16)
             else:
                 probs = torch.softmax(y[0,-1,:] / temperature, dim=-1)
-                next_token = torch.multinomial(probs, 1).to(torch.uint16)
+                next_token = torch.multinomial(probs, 1).to(torch.int16)
             prompt = torch.cat([prompt, next_token.reshape(1,1)], dim=1)
             result[i] = next_token
         return result
@@ -302,7 +302,7 @@ def load_compress(filename_base: str, tokenizer: Tokenizer, width: int, device: 
         return tokenize_compress(strings, tokenizer, width, device)
 
 def tokenize_compress(strings: list[str], tokenizer: Tokenizer, width: int, device: str) -> tuple[torch.Tensor, torch.Tensor, int]:
-    result = torch.zeros((len(strings), width), dtype=torch.uint16)
+    result = torch.zeros((len(strings), width), dtype=torch.int16)
     rmask = torch.zeros((len(strings), width), dtype=bool)
     rbits = 0
     for i,string in enumerate(strings):
