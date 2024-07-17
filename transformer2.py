@@ -70,6 +70,39 @@ class MMappedSlurper:
         self.mmap.close()
         os.close(self.fileno)
 
+class MemSlurper:
+    def __init__(self, filename_base: str, split: Literal['train','validation','test'], device: str, n_batch: int, n_context: int):
+        self.split = split
+        with open(f'{filename_base}.metadata.{split}','rb') as f:
+            buffer = f.read()
+            self.metadata = torch.frombuffer(buffer, dtype=torch.int64).reshape(-1,2)
+
+        with open(f'{filename_base}.{split}','rb') as f:
+            print("Loading big file into memory")
+            data = f.read()
+            print(f"Transferring to device {device}")
+            self.data = torch.frombuffer(data, dtype=torch.int16).to(device)
+            print("Done loading big file")
+        self.device = device
+        self.n_batch = n_batch
+        self.n_context = n_context
+    
+    def _pick_articles(self, n: int) -> torch.Tensor:
+        indices = torch.randint(0, len(self.metadata), (n,))
+        return self.metadata[indices]
+
+    def batch(self) -> tuple[torch.Tensor, torch.Tensor]:
+        with torch.no_grad():
+            articles = self._pick_articles(self.n_batch).to(self.device)
+            result = self.data[articles]
+            result_mask = (result != 0)
+            result_mask[0,:] = True
+            return result, result_mask
+
+    def close(self):
+        self.mmap.close()
+        os.close(self.fileno)
+
 class DataSlurper:
     def __init__(self, filename_base: str, split: Literal['train','validation','test'], device: str, n_batch: int, n_context: int):
         self.split = split
@@ -420,7 +453,7 @@ def main():
     d_hidden = args.dhidden
 
     torch.manual_seed(12345)
-    if args.command in ['slurp-in', 'train', 'mmap']:
+    if args.command in ['slurp-in', 'train', 'mmap', 'mem']:
         vslurper = DataSlurper(input_filename, 'validation', device, 64, n_context)
         vbatch, vmask = vslurper.batch()
         if args.gencompress:
@@ -432,6 +465,8 @@ def main():
         slurper = DataSlurper(input_filename, 'train', device, n_batch, n_context)
     elif args.command == 'mmap':
         slurper = MMappedSlurper(input_filename, 'train', device, n_batch, n_context)
+    elif args.command == 'mem':
+        slurper = MemSlurper(input_filename, 'train', device, n_batch, n_context)
     elif args.command == 'slurp-in':
         slurper = StdinSlurper(device, n_batch, n_context)
 
