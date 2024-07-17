@@ -297,13 +297,15 @@ def validation(model, vdata, vmask):
             count += 1
         return loss.item() / count, stats
 
-def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, vcmask, vcbits):
+def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, vcmask, vcbits, gamma, epoch):
     opt = torch.optim.Adam(model.parameters(), lr=0.01)
+    if gamma != 0:
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9)
     loss_sum = torch.zeros((), device=device)
     start_time = time.monotonic()
     results = []
     i = 0
-    target_i = 10000
+    target_i = epoch
     while time.monotonic() - start_time < time_s:
         batch, mask = slurper.batch()
         y,_ = model(batch,False,False)
@@ -317,7 +319,7 @@ def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, v
         loss_sum += loss.detach()
         i += len(batch)
         if i >= target_i:
-            tloss = loss_sum.item() / 10000
+            tloss = loss_sum.item() / epoch
             #print(f'Batch {i+1}, loss: {loss_sum.item() / 10000}')
             loss_sum = 0
             #print(tokenizer.decode(batch[0]))
@@ -335,7 +337,8 @@ def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, v
                 'predictions': [pred],
                 'stats': stats,
             })
-            target_i += 10000
+            target_i += epoch
+            scheduler.step()
     return results
 
 def compression_ratio(model: TransformerModel, vbatch_data: torch.Tensor, vmask_data: torch.Tensor, vbits: int) -> float:
@@ -441,6 +444,8 @@ def main():
     parser.add_argument('--ldiv', type=float, default=1.0)
     parser.add_argument('--batch', type=int, default=1)
     parser.add_argument('--gencompress', action='store_true')
+    parser.add_argument('--gamma', type=float, default=0)
+    parser.add_argument('--epoch', type=int, default=10000)
     args = parser.parse_args()
     input_filename = args.input_file
     dict_filename = f'{input_filename}.dictionary'
@@ -499,8 +504,8 @@ def main():
     #     y = model(vbatch2)
     #     print(y[:,:,0])
 
-    print(f"Training with time={args.time} n_layer={n_layer}, n_head={n_head}, n_batch={n_batch}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}, adiv={args.adiv}, pdiv={args.pdiv}, fixedpos={args.fixedpos}, layernorm={args.layernorm}, enorm={args.enorm}, ldiv={args.ldiv}")
-    losses = train(model, slurper, args.time, vbatch, vmask, device, tokenizer, vcompress, vcmask, vbits)
+    print(f"Training with time={args.time} n_layer={n_layer}, n_head={n_head}, n_batch={n_batch}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}, adiv={args.adiv}, pdiv={args.pdiv}, fixedpos={args.fixedpos}, layernorm={args.layernorm}, enorm={args.enorm}, ldiv={args.ldiv}, gamma={args.gamma}")
+    losses = train(model, slurper, args.time, vbatch, vmask, device, tokenizer, vcompress, vcmask, vbits, args.gamma, args.epoch)
     predictions = final_predictions(model, tokenizer, vbatch)
     with open(args.o, 'w') as f:
         json.dump({
@@ -518,6 +523,8 @@ def main():
                 'layernorm': args.layernorm,
                 'enorm': args.enorm,
                 'ldiv': args.ldiv,
+                'gamma': args.gamma,
+                'epoch': args.epoch,
             },
             'losses': losses,
             'final_predictions': predictions,
