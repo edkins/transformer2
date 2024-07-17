@@ -104,8 +104,8 @@ class MemSlurper:
             return result, result_mask
 
     def close(self):
-        self.mmap.close()
-        os.close(self.fileno)
+        self.data = None
+        self.metadata = None
 
 class DataSlurper:
     def __init__(self, filename_base: str, split: Literal['train','validation','test'], device: str, n_batch: int, n_context: int):
@@ -316,6 +316,7 @@ def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, v
         loss_sum += loss.detach()
         i += len(batch)
         if i >= target_i:
+            tloss = loss_sum.item() / 1000
             #print(f'Batch {i+1}, loss: {loss_sum.item() / 1000}')
             loss_sum = 0
             #print(tokenizer.decode(batch[0]))
@@ -328,6 +329,7 @@ def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, v
                 'time': t,
                 'batch': i,
                 'loss': vloss,
+                'tloss': tloss,
                 'ratio': vratio,
                 'predictions': [pred],
                 'stats': stats,
