@@ -46,7 +46,7 @@ def run(input_file: str, n_layer=2, n_head=4, d_model=128, d_k=4, d_hidden=128, 
         #ps = subprocess.Popen(['python', 'transformer2.py', 'slurp-out', *options], stdout=subprocess.PIPE)
         #subprocess.run(['python', 'transformer2.py', 'slurp-in', *options], stdin=ps.stdout)
         #ps.wait()
-        subprocess.run(['python', 'transformer2.py', 'train', *options])
+        subprocess.run(['python', 'transformer2.py', 'mem', *options])
 
 def main():
     parser = argparse.ArgumentParser()
