@@ -95,10 +95,10 @@ class MemSlurper:
         with torch.no_grad():
             articles = self._pick_articles(self.n_batch).to(self.device)
             starts = articles[:,0] // 2
-            ends = torch.minimum(starts + self.n_context, articles[:,1] // 2)
+            ends = torch.minimum(starts + self.n_context, articles[:,1] // 2) - 1
             result = torch.zeros((self.n_batch, self.n_context), dtype=torch.int16, device=self.device)
             for i in range(self.n_batch):
-                result[i,:ends[i]-starts[i]] = self.data[starts[i]:ends[i]]
+                result[i,1:1+ends[i]-starts[i]] = self.data[starts[i]:ends[i]]
             result_mask = (result != 0)
             result_mask[:,0] = True
             return result, result_mask
