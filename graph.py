@@ -34,6 +34,8 @@ def main():
             xlabel = 'time (minutes)'
 
         if args.kind in ['ratio','ratiodata']:
+            if 'ratio' not in losses[0]:
+                continue
             ys = [point['ratio'] for point in losses]
             yaxis_title = 'compression ratio'
         elif args.kind == 'tloss':

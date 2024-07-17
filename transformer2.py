@@ -298,12 +298,12 @@ def validation(model, vdata, vmask):
         return loss.item() / count, stats
 
 def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, vcmask, vcbits):
-    opt = torch.optim.Adam(model.parameters(), lr=0.001)
+    opt = torch.optim.Adam(model.parameters(), lr=0.01)
     loss_sum = torch.zeros((), device=device)
     start_time = time.monotonic()
     results = []
     i = 0
-    target_i = 1000
+    target_i = 10000
     while time.monotonic() - start_time < time_s:
         batch, mask = slurper.batch()
         y,_ = model(batch,False,False)
@@ -317,8 +317,8 @@ def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, v
         loss_sum += loss.detach()
         i += len(batch)
         if i >= target_i:
-            tloss = loss_sum.item() / 1000
-            #print(f'Batch {i+1}, loss: {loss_sum.item() / 1000}')
+            tloss = loss_sum.item() / 10000
+            #print(f'Batch {i+1}, loss: {loss_sum.item() / 10000}')
             loss_sum = 0
             #print(tokenizer.decode(batch[0]))
             vloss, stats = validation(model, vbatch, vmask)
@@ -335,7 +335,7 @@ def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, v
                 'predictions': [pred],
                 'stats': stats,
             })
-            target_i += 1000
+            target_i += 10000
     return results
 
 def compression_ratio(model: TransformerModel, vbatch_data: torch.Tensor, vmask_data: torch.Tensor, vbits: int) -> float:
