@@ -109,6 +109,7 @@ class TransformerModel(torch.nn.Module):
         self.mlp1 = param(n_layer, d_hidden, d_model, mag=mag)
         self.unembedding = param(d_model, n_dict, mag=mag)
         self.bias = param(1,1,n_dict, mag=mag)
+        self.n_dict = n_dict
         self.n_layer = n_layer
         self.n_head = n_head
         self.d_k = d_k
@@ -173,17 +174,23 @@ class TransformerModel(torch.nn.Module):
         else:
             return result, None
 
-def validation(model, batch, mask):
+def validation(model, vdata, vmask):
     with torch.no_grad():
-        y, stats = model(batch,False,True)
-        mr = mask[:,1:].reshape(-1)
-        yr = y[:,:-1,:].reshape(-1, y.shape[-1])[mr]
-        br = batch[:,1:].reshape(-1).long()[mr]
-        #print(batch.shape, y.shape, mr.shape, yr.shape, br.shape)
-        loss = torch.nn.functional.cross_entropy(yr, br, reduction='mean')
-        #print(f'  Validation loss: {loss.item()}')
-        #print(tokenizer.decode(batch[0]))
-        return loss.item(), stats
+        loss = torch.zeros((), device=vdata.device)
+        count = 0
+        for i in range(0, len(vdata), 4):
+            batch = vdata[i:i+4]
+            mask = vmask[i:i+4]
+            y, stats = model(batch,False,True)
+            mr = mask[:,1:].reshape(-1)
+            yr = y[:,:-1,:].reshape(-1, y.shape[-1])[mr]
+            br = batch[:,1:].reshape(-1).long()[mr]
+            #print(batch.shape, y.shape, mr.shape, yr.shape, br.shape)
+            loss += torch.nn.functional.cross_entropy(yr, br, reduction='mean')
+            #print(f'  Validation loss: {loss.item()}')
+            #print(tokenizer.decode(batch[0]))
+            count += 1
+        return loss.item() / count, stats
 
 def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, vcmask, vcbits):
     opt = torch.optim.Adam(model.parameters(), lr=0.001)
@@ -224,7 +231,7 @@ def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, v
             target_i += 1000
     return results
 
-def compression_ratio(model: TransformerModel, vbatch: torch.Tensor, vmask: torch.Tensor, vbits: int) -> float:
+def compression_ratio(model: TransformerModel, vbatch_data: torch.Tensor, vmask_data: torch.Tensor, vbits: int) -> float:
     """
     Find the negative base2-log likelihood of the model outputting vbatch (where some of the entries are irrelevant -
     those are masked out by vmask).
@@ -232,18 +239,22 @@ def compression_ratio(model: TransformerModel, vbatch: torch.Tensor, vmask: torc
     Then divide by the number of bits in the target, to get a compression ratio.
     """
     with torch.no_grad():
-        y,_ = model(vbatch,False,False)
-        mr = vmask[:,1:].reshape(-1)
-        logprobs = torch.nn.functional.log_softmax(y, dim=-1) / math.log(2)
-        #lpr = torch.nn.functional.embedding(vbatch.long(), logprobs)
-        lpr = logprobs[:,:-1,:].reshape(-1, logprobs.shape[-1])[mr]
-        br = vbatch[:,1:].reshape(-1).long()[mr]
-        width = lpr.shape[0]
-        size = -torch.sum(lpr[torch.arange(0, width), br])
+        size = 0
+        for i in range(0, len(vbatch_data), 4):
+            vbatch = vbatch_data[i:i+4]
+            vmask = vmask_data[i:i+4]
+            y,_ = model(vbatch,False,False)
+            mr = vmask[:,1:].reshape(-1)
+            logprobs = torch.nn.functional.log_softmax(y, dim=-1) / math.log(2)
+            #lpr = torch.nn.functional.embedding(vbatch.long(), logprobs)
+            lpr = logprobs[:,:-1,:].reshape(-1, logprobs.shape[-1])[mr]
+            br = vbatch[:,1:].reshape(-1).long()[mr]
+            width = lpr.shape[0]
+            size += -torch.sum(lpr[torch.arange(0, width), br])
         return (size / vbits).item()
 
-def prediction_to_string(model, tokenizer, prompt_tokens, n_tokens=30):
-    result = predict_slow(model, prompt_tokens, n_tokens, 0.8)
+def prediction_to_string(model, tokenizer, prompt_tokens, n_tokens=30, temperature=0.8):
+    result = predict_slow(model, prompt_tokens, n_tokens, temperature)
     return f'{tokenizer.decode(prompt_tokens).replace("\n","\\n")}-->{tokenizer.decode(result).replace("\n","\\n")}'
 
 def predict_slow(model, prompt_tokens, n_tokens, temperature=0):
@@ -259,6 +270,16 @@ def predict_slow(model, prompt_tokens, n_tokens, temperature=0):
                 next_token = torch.multinomial(probs, 1).to(torch.uint16)
             prompt = torch.cat([prompt, next_token.reshape(1,1)], dim=1)
             result[i] = next_token
+        return result
+
+def final_predictions(model: TransformerModel, tokenizer: Tokenizer, batch: torch.Tensor) -> list[str]:
+    with torch.no_grad():
+        result = []
+        for i in range(len(batch)):
+            prompt = batch[i,:10]
+            for temperature in [0, 0.25, 0.5, 0.8, 1.0]:
+                string = prediction_to_string(model, tokenizer, prompt)
+                result.append(f'{temperature:5.3f} {string}')
         return result
 
 def gen_compress(vbatch, vmask, tokenizer, filename_base) -> list[str]:
@@ -345,6 +366,7 @@ def main():
 
     print(f"Training with time={args.time} n_layer={n_layer}, n_head={n_head}, n_batch={n_batch}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}, adiv={args.adiv}, pdiv={args.pdiv}, fixedpos={args.fixedpos}, layernorm={args.layernorm}, enorm={args.enorm}, ldiv={args.ldiv}")
     losses = train(model, slurper, args.time, vbatch, vmask, device, tokenizer, vcompress, vcmask, vbits)
+    predictions = final_predictions(model, tokenizer, vbatch)
     with open(args.o, 'w') as f:
         json.dump({
             'hyper': {
@@ -353,6 +375,7 @@ def main():
                 'd_model': d_model,
                 'd_k': d_k,
                 'd_hidden': d_hidden,
+                'n_dict': n_dict,
                 'mag': args.mag,
                 'adiv': args.adiv,
                 'pdiv': args.pdiv,
@@ -362,6 +385,7 @@ def main():
                 'ldiv': args.ldiv,
             },
             'losses': losses,
+            'final_predictions': predictions,
         }, f, indent=2)
 
 if __name__ == '__main__':

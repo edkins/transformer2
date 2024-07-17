@@ -11,7 +11,8 @@ use process_xml::Article;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 
 use serde::Deserialize;
-use tokenize::{write_condensed, ArticleMetadata, TokenizerOutput};
+use tokenize::{write_condensed, ArticleMetadata, TokenizedArticle, TokenizerOutput};
+use train_test_split::Split;
 use word_counter::WordCounter;
 
 mod bpe;
@@ -62,6 +63,11 @@ enum Command {
     Clean {
         filename: String,
     },
+    Retokenize {
+        filename: String,
+        #[clap(short = 'o')]
+        out_filename: String,
+    },
 }
 
 fn main() {
@@ -87,6 +93,7 @@ fn main() {
         } => cat(&filename, &dict_filename),
         Command::Condense { filename } => condense(&filename),
         Command::Clean { filename } => clean(&filename),
+        Command::Retokenize { filename, out_filename } => retokenize(&filename, &out_filename),
     }
 
     println!("Elapsed time: {:?}", time.elapsed());
@@ -97,6 +104,47 @@ struct AllMetadataIn {
     train: Vec<ArticleMetadata>,
     validation: Vec<ArticleMetadata>,
     test: Vec<ArticleMetadata>,
+}
+
+fn retokenize(filename: &str, out_filename: &str) {
+    let dictionary = BufReader::new(File::open(format!("{}.dictionary", filename)).unwrap());
+    let dictionary = std::iter::once(b"[--SEP--]".to_vec())
+        .chain(
+            dictionary
+            .lines()
+            .map(|line| BASE64_STANDARD.decode(line.unwrap()).unwrap()),
+        )
+        .collect::<Vec<_>>();
+
+    let mut tokenizer = tokenize::Tokenizer::default();
+    tokenizer.initialize(&format!("{}.dictionary", out_filename));
+    
+    let mut output = TokenizerOutput::create(out_filename);
+    for split_enum in [Split::Train, Split::Validation, Split::Test] {
+        let split = split_enum.to_str();
+        println!("Processing split {}", split);
+        let mut in_file = progress_read_input(&format!("{}.{}", filename, split));
+        let mut article_in = Vec::new();
+        while let Ok(tok) = in_file.read_u16::<byteorder::LittleEndian>() {
+            if tok != 0 {
+                article_in.extend_from_slice(&dictionary[tok as usize]);
+                continue;
+            }
+            let mut article_out = Vec::new();
+            let mut new_article = Vec::new();
+            std::mem::swap(&mut article_in, &mut new_article);
+            for word in split_words::split_words(String::from_utf8(new_article).expect("utf-8 error")) {
+                article_out.extend_from_slice(tokenizer.tokenize_word(word));
+            }
+            article_out.push(0);
+            output.write_article(TokenizedArticle {
+                url: String::new(),  // TODO: this shouldn't really be here. It gets ignored by the later stages
+                split: split_enum,
+                tokens: article_out,
+            });
+        }
+    };
+    output.write_metadata();
 }
 
 fn clean(filename: &str) {
