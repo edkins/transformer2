@@ -42,7 +42,10 @@ def run(input_file: str, n_layer=2, n_head=4, d_model=128, d_k=4, d_hidden=128, 
     if os.path.exists(output_file):
         print(f'File {output_file} already exists')
     else:
-        subprocess.run(['python', 'transformer2.py', input_file, '-o', output_file, '--time', str(time_s), '--nlayer', str(n_layer), '--nhead', str(n_head), '--dmodel', str(d_model), '--dk', str(d_k), '--dhidden', str(d_hidden), '--mag', str(mag), '--adiv', str(adiv), '--pdiv', str(pdiv), '--fixedpos', str(fixedpos), '--layernorm', str(layernorm), '--enorm', str(enorm), '--ldiv', str(ldiv), '--batch', str(n_batch)])
+        options = [input_file, '-o', output_file, '--time', str(time_s), '--nlayer', str(n_layer), '--nhead', str(n_head), '--dmodel', str(d_model), '--dk', str(d_k), '--dhidden', str(d_hidden), '--mag', str(mag), '--adiv', str(adiv), '--pdiv', str(pdiv), '--fixedpos', str(fixedpos), '--layernorm', str(layernorm), '--enorm', str(enorm), '--ldiv', str(ldiv), '--batch', str(n_batch)]
+        ps = subprocess.Popen(['python', 'transformer2.py', 'slurp-out', *options], stdout=subprocess.PIPE)
+        subprocess.run(['python', 'transformer2.py', 'slurp-in', *options], stdin=ps.stdout)
+        ps.wait()
 
 def main():
     parser = argparse.ArgumentParser()
@@ -52,17 +55,9 @@ def main():
     inp1 = str(pathlib.Path(parser.parse_args().directory, 't32k'))
     inp2 = str(pathlib.Path(parser.parse_args().directory, 't24k'))
     print(inp0)
-    print(inp1)
-    print(inp2)
-    run(inp0, time_s=1800, n_layer=2)
-    run(inp1, time_s=1800, n_layer=2)
-    run(inp2, time_s=1800, n_layer=2)
-    run(inp0, time_s=1800, n_layer=3)
-    run(inp1, time_s=1800, n_layer=3)
-    run(inp2, time_s=1800, n_layer=3)
-    #run(inp, time_s=300, n_layer=2, layernorm='Affine', ldiv=3, n_batch=4, d_model=64)
-    #run(inp, time_s=300, n_layer=2, layernorm='Affine', ldiv=3, n_batch=4, d_model=512, d_hidden=512)
-    #run(inp, time_s=300, n_layer=2, layernorm='Affine', ldiv=3, n_batch=4, d_model=64, d_hidden=64)
+    #print(inp1)
+    #print(inp2)
+    run(inp0, time_s=30, n_layer=4)
 
 if __name__ == '__main__':
     main()

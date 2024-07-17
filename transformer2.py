@@ -2,9 +2,34 @@ import argparse
 import base64
 import json
 import math
+import sys
 import time
 import torch
 from typing import Literal
+
+class StdinSlurper:
+    def __init__(self, device: str, n_batch: int, n_context: int):
+        self.device = device
+        self.n_batch = n_batch
+        self.n_context = n_context
+
+    def batch(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Returns an int16 tensor of shape (n, length) read from stdin as binary.
+        """
+        with torch.no_grad():
+            read_bytes = sys.stdin.buffer.read(self.n_batch * self.n_context * 2)
+            batch = torch.frombuffer(read_bytes, dtype=torch.int16).reshape(self.n_batch, self.n_context).to(self.device)
+            mask = batch != 0
+            mask[0,:] = True
+            return batch, mask
+
+class StdoutWriter:
+    def __init__(self):
+        pass
+
+    def write(self, tensor: torch.Tensor):
+        sys.stdout.buffer.write(tensor.cpu().numpy().tobytes())
 
 class DataSlurper:
     def __init__(self, filename_base: str, split: Literal['train','validation','test'], device: str, n_batch: int, n_context: int):
@@ -316,6 +341,7 @@ def tokenize_compress(strings: list[str], tokenizer: Tokenizer, width: int, devi
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument('command', type=str) # options=['slurp-out', 'slurp-in', 'train']
     parser.add_argument('input_file', type=str)
     parser.add_argument('-o', type=str)
     parser.add_argument('--nlayer', type=int, default=1)
@@ -336,7 +362,10 @@ def main():
     args = parser.parse_args()
     input_filename = args.input_file
     dict_filename = f'{input_filename}.dictionary'
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    if torch.cuda.is_available() and args.command in ['slurp-in', 'train']:
+        device = 'cuda'
+    else:
+        device = 'cpu'
     tokenizer = Tokenizer(dict_filename)
     
     n_layer = args.nlayer
@@ -349,15 +378,33 @@ def main():
     d_hidden = args.dhidden
 
     torch.manual_seed(12345)
-    vslurper = DataSlurper(input_filename, 'validation', device, 64, n_context)
-    slurper = DataSlurper(input_filename, 'train', device, n_batch, n_context)
-    vbatch, vmask = vslurper.batch()
+    if args.command in ['slurp-in', 'train']:
+        vslurper = DataSlurper(input_filename, 'validation', device, 64, n_context)
+        vbatch, vmask = vslurper.batch()
+        if args.gencompress:
+            gen_compress(vbatch, vmask, tokenizer, input_filename)
+        vcompress, vcmask, vbits = load_compress(input_filename, tokenizer, n_context, device)
+        model = TransformerModel(n_layer, n_head, n_dict, d_model, d_k, d_hidden, n_context, args.mag, args.adiv, args.pdiv, args.fixedpos, args.layernorm, args.enorm, args.ldiv).to(device)
 
-    if args.gencompress:
-        gen_compress(vbatch, vmask, tokenizer, input_filename)
-    vcompress, vcmask, vbits = load_compress(input_filename, tokenizer, n_context, device)
+    if args.command in ['slurp-out', 'train']:
+        slurper = DataSlurper(input_filename, 'train', device, n_batch, n_context)
+    elif args.command == 'slurp-in':
+        slurper = StdinSlurper(device, n_batch, n_context)
 
-    model = TransformerModel(n_layer, n_head, n_dict, d_model, d_k, d_hidden, n_context, args.mag, args.adiv, args.pdiv, args.fixedpos, args.layernorm, args.enorm, args.ldiv).to(device)
+
+    if args.command == 'slurp-out':
+        writer = StdoutWriter()
+        i = 0
+        target_i = 10_000
+        while True:
+            batch, mask = slurper.batch()
+            i += len(batch)
+            writer.write(batch)
+            writer.write(mask)
+            if i >= target_i:
+                sys.stderr.write(f'Sent datapoint {i}\n')
+                target_i += 10_000
+        # doesn't ever finish. Just carries on slurping.
 
     # with torch.no_grad():
     #     vbatch2 = torch.stack([vbatch[0]] * 2)
