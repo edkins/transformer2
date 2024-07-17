@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('kind', type=str, choices=['time','data','ratio','ratiodata'])
+    parser.add_argument('kind', type=str, choices=['time','data','ratio','ratiodata','tloss'])
     args = parser.parse_args()
     with os.scandir('data') as it:
         data = []
@@ -21,6 +21,9 @@ def main():
     #colors = ['#800','#f00','#f88','#fcc', '#004','#00f','#44f','#ccf','#080']
 
     fig = go.Figure()
+    if len(data) == 0:
+        raise Exception('No data found')
+
     for i, dataset in enumerate(data):
         losses = dataset['losses']
         if args.kind in ['data','ratiodata']:
@@ -33,6 +36,9 @@ def main():
         if args.kind in ['ratio','ratiodata']:
             ys = [point['ratio'] for point in losses]
             yaxis_title = 'compression ratio'
+        elif args.kind == 'tloss':
+            ys = [point['tloss'] for point in losses]
+            yaxis_title = 'training loss'
         else:
             ys = [point['loss'] for point in losses]
             yaxis_title = 'loss'

@@ -100,7 +100,7 @@ class MemSlurper:
             for i in range(self.n_batch):
                 result[i,:ends[i]-starts[i]] = self.data[starts[i]:ends[i]]
             result_mask = (result != 0)
-            result_mask[0,:] = True
+            result_mask[:,0] = True
             return result, result_mask
 
     def close(self):
