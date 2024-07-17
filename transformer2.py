@@ -255,7 +255,9 @@ def compression_ratio(model: TransformerModel, vbatch_data: torch.Tensor, vmask_
 
 def prediction_to_string(model, tokenizer, prompt_tokens, n_tokens=30, temperature=0.8):
     result = predict_slow(model, prompt_tokens, n_tokens, temperature)
-    return f'{tokenizer.decode(prompt_tokens).replace("\n","\\n")}-->{tokenizer.decode(result).replace("\n","\\n")}'
+    left = tokenizer.decode(prompt_tokens).replace("\n","\\n")
+    right = tokenizer.decode(result).replace("\n","\\n")
+    return f'{left}-->{right}'
 
 def predict_slow(model, prompt_tokens, n_tokens, temperature=0):
     result = torch.zeros(n_tokens, dtype=torch.uint16)
