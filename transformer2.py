@@ -340,7 +340,7 @@ def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, v
                 current_lr = scheduler.get_last_lr()[0]
                 scheduler.step()
 
-            print(f'{t/60:8.3f} {i:7d}, loss: {vloss:6.4f} ratio: {vratio:6.4f} lr: {current_lr:6.4f} {pred}')
+            print(f'{t/60:8.3f} {i:7d}, loss:{vloss:6.4f} ratio:{vratio:6.4f} lr:{current_lr:7.5f} {pred}')
             results.append({
                 'time': t,
                 'batch': i,
@@ -458,7 +458,7 @@ def main():
     parser.add_argument('--batch', type=int, default=1)
     parser.add_argument('--gencompress', action='store_true')
     parser.add_argument('--lr', type=float, default=0.01)
-    parser.add_argument('--ratiolr', type=bool, default=False)
+    parser.add_argument('--ratiolr', type=str, default='False')
     parser.add_argument('--gamma', type=float, default=0)
     parser.add_argument('--epoch', type=int, default=10000)
     args = parser.parse_args()
@@ -519,8 +519,9 @@ def main():
     #     y = model(vbatch2)
     #     print(y[:,:,0])
 
-    print(f"Training with time={args.time} n_layer={n_layer}, n_head={n_head}, n_batch={n_batch}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}, adiv={args.adiv}, pdiv={args.pdiv}, fixedpos={args.fixedpos}, layernorm={args.layernorm}, enorm={args.enorm}, ldiv={args.ldiv}, gamma={args.gamma}, ratiolr={args.ratiolr}, lr={args.lr}, epoch={args.epoch}")
-    losses = train(model, slurper, args.time, vbatch, vmask, device, tokenizer, vcompress, vcmask, vbits, args.gamma, args.ratiolr, args.lr, args.epoch)
+    ratiolr = args.ratiolr != 'False'
+    print(f"Training with time={args.time} n_layer={n_layer}, n_head={n_head}, n_batch={n_batch}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}, adiv={args.adiv}, pdiv={args.pdiv}, fixedpos={args.fixedpos}, layernorm={args.layernorm}, enorm={args.enorm}, ldiv={args.ldiv}, gamma={args.gamma}, ratiolr={ratiolr}, lr={args.lr}, epoch={args.epoch}")
+    losses = train(model, slurper, args.time, vbatch, vmask, device, tokenizer, vcompress, vcmask, vbits, args.gamma, ratiolr, args.lr, args.epoch)
     predictions = final_predictions(model, tokenizer, vbatch)
     with open(args.o, 'w') as f:
         json.dump({
@@ -539,6 +540,8 @@ def main():
                 'enorm': args.enorm,
                 'ldiv': args.ldiv,
                 'gamma': args.gamma,
+                'ratio_lr': ratiolr,
+                'lr': args.lr,
                 'epoch': args.epoch,
             },
             'losses': losses,

@@ -65,7 +65,7 @@ def main():
     #print(inp1)
     #print(inp2)
     #run(inp0, time_s=30, mode='train', gamma=1, n_batch=4, epoch=1000)
-    run(inp0, time_s=300, mode='mem', gamma=1)
+    run(inp0, time_s=300, mode='mem', ratiolr=True, gamma=1)
 
 if __name__ == '__main__':
     main()
