@@ -300,7 +300,7 @@ def validation(model, vdata, vmask):
 def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, vcmask, vcbits, gamma, epoch):
     opt = torch.optim.Adam(model.parameters(), lr=0.01)
     if gamma != 0:
-        scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9)
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=gamma)
     loss_sum = torch.zeros((), device=device)
     start_time = time.monotonic()
     results = []
