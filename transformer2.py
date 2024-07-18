@@ -521,7 +521,7 @@ def main():
     #     y = model(vbatch2)
     #     print(y[:,:,0])
 
-    ratiolr = args.ratiolr != 'False'
+    ratiolr = args.ratiolr == 'True'
     reciplr = args.ratiolr == 'Recip'
     print(f"Training with time={args.time} n_layer={n_layer}, n_head={n_head}, n_batch={n_batch}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}, adiv={args.adiv}, pdiv={args.pdiv}, fixedpos={args.fixedpos}, layernorm={args.layernorm}, enorm={args.enorm}, ldiv={args.ldiv}, gamma={args.gamma}, ratiolr={ratiolr}, reciplr={reciplr} lr={args.lr}, epoch={args.epoch}")
     losses = train(model, slurper, args.time, vbatch, vmask, device, tokenizer, vcompress, vcmask, vbits, args.gamma, ratiolr, reciplr, args.lr, args.epoch)
