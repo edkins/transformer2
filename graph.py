@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('kind', type=str, choices=['time','data','ratio','ratiodata','tloss'])
+    parser.add_argument('kind', type=str, choices=['time','data','ratio','ratiodata','tloss','lr','ratiolr'])
     args = parser.parse_args()
     with os.scandir('data') as it:
         data = []
@@ -29,15 +29,25 @@ def main():
         if args.kind in ['data','ratiodata']:
             xs = [point['batch'] for point in losses]
             xlabel = 'datapoint'
+        elif args.kind == 'ratiolr':
+            if 'lr' not in losses[0]:
+                continue
+            xs = [point['lr'] for point in losses]
+            xlabel = 'learning rate'
         else:
             xs = [point['time']/60 for point in losses]
             xlabel = 'time (minutes)'
 
-        if args.kind in ['ratio','ratiodata']:
+        if args.kind in ['ratio','ratiodata','ratiolr']:
             if 'ratio' not in losses[0]:
                 continue
             ys = [point['ratio'] for point in losses]
             yaxis_title = 'compression ratio'
+        elif args.kind == 'lr':
+            if 'lr' not in losses[0]:
+                continue
+            ys = [point['lr'] for point in losses]
+            yaxis_title = 'learning rate'
         elif args.kind == 'tloss':
             ys = [point['tloss'] for point in losses]
             yaxis_title = 'training loss'

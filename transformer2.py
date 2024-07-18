@@ -333,7 +333,7 @@ def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, v
             t = time.monotonic() - start_time
             pred = prediction_to_string(model, tokenizer, vbatch[0,:10])
             if ratiolr:
-                lr_mult[0] = min(1, math.exp((vratio - 0.25) * gamma))   # if vratio is bigger than 0.25, learning rate is just the initial value. Otherwise if vratio decreases by a fixed amount, learning rate decreases by a fixed ratio.
+                lr_mult[0] = min(1, math.exp((vratio - 0.2) * gamma))   # if vratio is bigger than 0.25, learning rate is just the initial value. Otherwise if vratio decreases by a fixed amount, learning rate decreases by a fixed ratio.
             if scheduler is None:
                 current_lr = lr
             else:
