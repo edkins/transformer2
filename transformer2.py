@@ -297,11 +297,13 @@ def validation(model, vdata, vmask):
             count += 1
         return loss.item() / count, stats
 
-def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, vcmask, vcbits, gamma, ratiolr, lr, epoch):
+def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, vcmask, vcbits, gamma, ratiolr, reciplr, lr, epoch):
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     lr_mult = [1]
     if ratiolr:
         scheduler = torch.optim.lr_scheduler.LambdaLR(opt, lambda i: lr_mult[0])
+    elif reciplr:
+        scheduler = torch.optim.lr_scheduler.LambdaLR(opt, lambda i: 1 / (1 + gamma * i / 25))
     elif gamma != 0:
         scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=gamma)
     else:
@@ -520,8 +522,9 @@ def main():
     #     print(y[:,:,0])
 
     ratiolr = args.ratiolr != 'False'
-    print(f"Training with time={args.time} n_layer={n_layer}, n_head={n_head}, n_batch={n_batch}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}, adiv={args.adiv}, pdiv={args.pdiv}, fixedpos={args.fixedpos}, layernorm={args.layernorm}, enorm={args.enorm}, ldiv={args.ldiv}, gamma={args.gamma}, ratiolr={ratiolr}, lr={args.lr}, epoch={args.epoch}")
-    losses = train(model, slurper, args.time, vbatch, vmask, device, tokenizer, vcompress, vcmask, vbits, args.gamma, ratiolr, args.lr, args.epoch)
+    reciplr = args.ratiolr == 'Recip'
+    print(f"Training with time={args.time} n_layer={n_layer}, n_head={n_head}, n_batch={n_batch}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}, adiv={args.adiv}, pdiv={args.pdiv}, fixedpos={args.fixedpos}, layernorm={args.layernorm}, enorm={args.enorm}, ldiv={args.ldiv}, gamma={args.gamma}, ratiolr={ratiolr}, reciplr={reciplr} lr={args.lr}, epoch={args.epoch}")
+    losses = train(model, slurper, args.time, vbatch, vmask, device, tokenizer, vcompress, vcmask, vbits, args.gamma, ratiolr, reciplr, args.lr, args.epoch)
     predictions = final_predictions(model, tokenizer, vbatch)
     with open(args.o, 'w') as f:
         json.dump({
@@ -541,6 +544,7 @@ def main():
                 'ldiv': args.ldiv,
                 'gamma': args.gamma,
                 'ratio_lr': ratiolr,
+                'recip_lr': reciplr,
                 'lr': args.lr,
                 'epoch': args.epoch,
             },
