@@ -150,12 +150,28 @@ class DataSlurper:
         self.file.close()
 
 class Tokenizer:
-    def __init__(self, dict_filename: str):
+    def __init__(self, dict_filename: str=None, tokens=None):
+        if tokens is not None:
+            self.tokens = tokens
+            return
         self.tokens = [b'$']    # start/end of document marker. Not an actual dollar sign.
         with open(dict_filename) as f:
             for line in f:
                 self.tokens.append(base64.b64decode(line.strip()))
     
+    def lookup_name(self, t:int) -> str:
+        if t == 0:
+            return '$$'
+        tok = self.tokens[t]
+        if tok == b'\n':
+            return '\\n'
+        elif tok == b' ':
+            return '   '
+        elif all(a >= 32 and a <= 126 for a in tok):
+            return tok.decode('utf-8')
+        else:
+            return str(tok)
+
     def decode(self, tensor: torch.Tensor) -> str:
         if len(tensor.shape) != 1:
             raise ValueError('Expected a 1D tensor')

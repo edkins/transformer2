@@ -1,14 +1,23 @@
-import argparse
-import readline
 import torch
 from transformer2 import TransformerModel, Tokenizer, predict_slow
+from flask import Flask, request
+import os
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('model', type=str)
-    args = parser.parse_args()
-    print(f'Loading model {args.model}')
-    with open(args.model, 'rb') as f:
+model = None
+tokenizer = None
+hyper = None
+
+def load():
+    global model
+    global tokenizer
+    global hyper
+
+    if model is not None:
+        return model, tokenizer, hyper
+
+    model_file = os.environ['MODEL']
+    print(f'Loading model {model_file}')
+    with open(model_file, 'rb') as f:
         things = torch.load(f)
         hyper = things['hyper']
         n_context = hyper['n_context']
@@ -32,11 +41,25 @@ def main():
         model.load_state_dict(things['model'])
 
     tokenizer = Tokenizer(tokens=things['dictionary'])
-    while True:
-        prompt = input('> ')
-        prompt_tokens = tokenizer.encode_slow(prompt)
-        tokens = predict_slow(model, prompt_tokens, n_context - len(prompt_tokens))
-        print(tokenizer.decode(tokens))
+    return model, tokenizer, hyper
 
-if __name__ == '__main__':
-    main()
+app = Flask(__name__)
+load()
+
+@app.get('/')
+def index():
+    return app.redirect('/static/index.html')
+
+@app.post('/api/tokenize')
+def tokenize():
+    model, tokenizer, hyper = load()
+    tokens = tokenizer.encode_slow(request.json['prompt'])
+    return {
+        'tokens': [
+            {
+                'token': token.item(),
+                'name': tokenizer.lookup_name(token.item()),
+            }
+            for token in tokens
+        ]
+    }

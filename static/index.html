@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Interact with transformer2</title>
+<style>
+body {
+    font-family: sans-serif;
+}
+textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.5em;
+    margin: 0.5em 0;
+}
+span.token {
+    padding: 0.2em;
+    margin: 0.2em;
+    border: 1px solid #668;
+    border-radius: 0.2em;
+    background-color: #ccf;
+    white-space: pre;
+}
+</style>
+<script>
+"use strict";
+
+async function tokenize() {
+    const prompt = document.getElementById("prompt").value;
+    const response = await fetch("/api/tokenize", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({prompt: prompt}),
+    });
+    if (!response.ok) {
+        console.error(response);
+        return;
+    }
+    const {tokens} = await response.json();
+    const tokensDiv = document.getElementById("tokens");
+    tokensDiv.innerHTML = "";
+    for (const token of tokens) {
+        const tokenDiv = document.createElement("span");
+        tokenDiv.className = "token";
+        tokenDiv.textContent = token.name;
+        tokensDiv.appendChild(tokenDiv);
+    }
+}
+</script>
+</head>
+<body>
+<textarea id="prompt" value="" onchange="tokenize()" onkeyup="tokenize()" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+</textarea>
+<br>
+<div id="tokens"></div>
+</body>
+</html>
