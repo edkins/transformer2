@@ -10,12 +10,19 @@ body {
 div.tokenholder.p0 {
     padding: 0.5em;
     display: inline-block;
+}
+div.p0 {
     background: #afc;
 }
 div.tokenholder.p1 {
     padding: 0.5em;
     display: inline-block;
+}
+div.p1 {
     background: #fac;
+}
+div.tableholder {
+    display: inline-block;
 }
 div.canvasholder {
     background: #ccf;
@@ -28,7 +35,7 @@ textarea {
     margin: 0.5em 0.5em;
 }
 span.token {
-    padding: 0.2em;
+    padding: 0.2em 0;
     margin: 0.5em 0.2em;
     border: 1px solid #668;
     border-radius: 0.2em;
@@ -38,12 +45,14 @@ span.token {
 span.token.h {
     background-color: #88f;
 }
-button {
-    padding: 0.5em;
+button.newgadget {
     margin: 0.5em 0.5em;
 }
 button.x {
     color: red;
+}
+td.token {
+    width: 20em;
 }
 </style>
 <script>
@@ -173,12 +182,70 @@ class AttnGadget {
         div.appendChild(canvas);
         return div;
     }
+}
 
+class PredictGadget {
+    constructor(n) {
+        this.n = n;
+    }
+
+    async run(prompt0, prompt1, model0, model1, t0, t1) {
+        const p = [prompt0, prompt1][this.n];
+        const m = [model0, model1][this.n];
+        const response = await fetch("/api/predict", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({prompt: p, model: m}),
+        });
+        if (!response.ok) {
+            throw new Error(`Failed to get next: ${response.statusText}`);
+        }
+        const {next} = await response.json();
+        const nextDiv = document.createElement('div');
+        nextDiv.className = `tableholder p${this.n}`;
+        const table = document.createElement('table');
+        for (let i = 0; i < 10; i++) {
+            const tr = document.createElement('tr');
+            const td0 = document.createElement('td');
+            td0.onclick = async() => {
+                td0.onclick = undefined;
+                await add_token(this.n, next[i].name);
+            }
+            const td1 = document.createElement('td');
+            const td2 = document.createElement('td');
+            const tokenSpan = document.createElement("span");
+            tokenSpan.className = "token";
+            tokenSpan.textContent = next[i].name;
+            td0.appendChild(tokenSpan);
+            td0.className = "token";
+            td1.textContent = next[i].prob.toFixed(6);
+            tr.appendChild(td0);
+            tr.appendChild(td1);
+
+            const temperature = (i + 1) / 10;
+            const temperature_token = choose_temperature(next, temperature);
+            const temperatureButton = document.createElement("button");
+            temperatureButton.textContent = `Temperature ${temperature.toFixed(1)}`;
+            temperatureButton.onclick = async() => {
+                temperatureButton.onclick = undefined;
+                await add_token(this.n, temperature_token);
+            };
+            td2.appendChild(temperatureButton);
+            tr.appendChild(td2);
+
+            table.appendChild(tr);
+        }
+        nextDiv.appendChild(table);
+        return nextDiv;
+    }
 }
 
 class GadgetHolder {
     constructor() {
-        this.gadgets = [new TokenGadget(0), new TokenGadget(1), new AttnGadget(true)];
+        //this.gadgets = [new TokenGadget(0), new TokenGadget(1), new AttnGadget(true)];
+        this.gadgets = [new PredictGadget(0), new PredictGadget(1)];
     }
 
     async run(t0, t1) {
@@ -193,13 +260,12 @@ class GadgetHolder {
         const model1 = document.getElementById("model1").value;
         const div = document.createElement('div');
         for (const gadget of this.gadgets) {
-            const thing = this;
             const gdiv = await gadget.run(prompt0, prompt1, model0, model1, t0, t1);
             const xdiv = document.createElement('div');
             const xbutton = document.createElement('button');
             xbutton.className = 'x';
             xbutton.textContent = "X";
-            xbutton.onclick = function() {console.log('foo'); thing.remove(gadget); return true};
+            xbutton.onclick = () => this.remove(gadget);
             xdiv.appendChild(xbutton);
             xdiv.appendChild(gdiv);
             div.appendChild(xdiv);
@@ -235,6 +301,30 @@ async function highlight_token_pair(t0, t1) {
     await gadgetHolder.run(t0, t1);
 }
 
+function choose_temperature(next, temperature) {
+    if (temperature === 0) {
+        return next[0];
+    }
+    let sum = 0;
+    for (const token of next) {
+        sum += Math.pow(token.prob, 1 / temperature);
+    }
+    let r = Math.random() * sum;
+    for (const token of next) {
+        r -= Math.pow(token.prob, 1 / temperature);
+        if (r <= 0) {
+            return token.name;
+        }
+    }
+    return next[next.length - 1].name;
+}
+
+async function add_token(n, token) {
+    const prompt = document.getElementById(`prompt${n}`);
+    prompt.value += token;
+    await handle_prompt();
+}
+
 async function load() {
     const response = await fetch("/api/models");
     if (!response.ok) {
@@ -263,13 +353,14 @@ window.onload = load;
 </script>
 </head>
 <body>
-<div>
+<div class="p0">
 <select id="model0" onchange="handle_prompt()" autocomplete="off">
 </select>
 <br>
 <textarea id="prompt0" value="" onkeyup="handle_prompt()" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
 </textarea>
-<br>
+</div>
+<div class="p1">
 <select id="model1" onchange="handle_prompt()" autocomplete="off">
 </select>
 <br>
@@ -278,10 +369,12 @@ window.onload = load;
 <br>
 </div>
 <div>
-<button onclick="gadgetHolder.add(new TokenGadget(0))">Tokenizer 0</button>
-<button onclick="gadgetHolder.add(new TokenGadget(1))">Tokenizer 1</button>
-<button onclick="gadgetHolder.add(new AttnGadget(False))">Attention</button>
-<button onclick="gadgetHolder.add(new AttnGadget(True))">Diff</button>
+<button class="newgadget" onclick="gadgetHolder.add(new TokenGadget(0))">Tokenizer 0</button>
+<button class="newgadget" onclick="gadgetHolder.add(new TokenGadget(1))">Tokenizer 1</button>
+<button class="newgadget" onclick="gadgetHolder.add(new AttnGadget(false))">Attention</button>
+<button class="newgadget" onclick="gadgetHolder.add(new AttnGadget(true))">Diff</button>
+<button class="newgadget" onclick="gadgetHolder.add(new PredictGadget(0))">Predict 0</button>
+<button class="newgadget" onclick="gadgetHolder.add(new PredictGadget(1))">Predict 1</button>
 </div>
 <div id="gadgets"></div>
 </body>

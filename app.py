@@ -88,3 +88,20 @@ def attention():
         'X-layers': str(hyper['n_layer']),
         'X-tokens': str(len(tokens)),
     })
+
+@app.post('/api/predict')
+def probs():
+    model, tokenizer, hyper = load(request.json['model'])
+    tokens = tokenizer.encode_slow(request.json['prompt'])
+    logits = model(tokens.reshape(1,-1), last_only=True)[0].reshape(-1)
+    probs = torch.softmax(logits, dim=-1)
+    return {
+        'next': list(sorted((
+            {
+                'token': i,
+                'name': tokenizer.lookup_name(i),
+                'prob': prob.item(),
+            }
+            for i, prob in enumerate(probs)), key=lambda x: -x['prob'])
+        )
+    }
