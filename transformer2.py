@@ -471,6 +471,7 @@ def main():
     parser.add_argument('--gamma', type=float, default=0)
     parser.add_argument('--epoch', type=int, default=10000)
     parser.add_argument('--vsmall', type=int, default=0)
+    parser.add_argument('--save', type=str, default='')
     args = parser.parse_args()
     input_filename = args.input_file
     dict_filename = f'{input_filename}.dictionary'
@@ -534,6 +535,9 @@ def main():
     reciplr = args.ratiolr == 'Recip'
     print(f"Training with time={args.time} n_layer={n_layer}, n_head={n_head}, n_batch={n_batch}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}, adiv={args.adiv}, pdiv={args.pdiv}, fixedpos={args.fixedpos}, layernorm={args.layernorm}, enorm={args.enorm}, ldiv={args.ldiv}, gamma={args.gamma}, ratiolr={ratiolr}, reciplr={reciplr} lr={args.lr}, epoch={args.epoch}, vsmall={vsmall}")
     losses = train(model, slurper, args.time, vbatch, vmask, device, tokenizer, vcompress, vcmask, vbits, args.gamma, ratiolr, reciplr, args.lr, args.epoch)
+    if args.save != '':
+        with open(args.save, 'wb') as f:
+            torch.save(model.state_dict(), f)
     predictions = final_predictions(model, tokenizer, vbatch)
     with open(args.o, 'w') as f:
         json.dump({
