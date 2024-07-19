@@ -3,7 +3,7 @@ import os
 import pathlib
 import subprocess
 
-def run(input_file: str, mode='mem', n_layer=2, n_head=4, d_model=128, d_k=4, d_hidden=128, time_s=300, mag=0.125, adiv=10, pdiv=10, fixedpos='FromZero', layernorm='Affine', enorm='False', ldiv=3, n_batch=64, gamma=0, ratiolr=False, lr=0.01, epoch=10000):
+def run(input_file: str, mode='mem', n_layer=2, n_head=4, d_model=128, d_k=4, d_hidden=128, time_s=300, mag=0.125, adiv=10, pdiv=10, fixedpos='FromZero', layernorm='Affine', enorm='False', ldiv=3, n_batch=64, gamma=0, ratiolr='False', lr=0.01, epoch=10000):
     output_file = f'data/'
     if input_file.endswith('t4k'):
         output_file += '4k_'
@@ -42,13 +42,15 @@ def run(input_file: str, mode='mem', n_layer=2, n_head=4, d_model=128, d_k=4, d_
         output_file += f'_g{gamma}'
     if lr != 0.01:
         output_file += f'_lr{lr}'
-    if ratiolr:
+    if ratiolr == 'True':
         output_file += '_ratiolr'
+    elif ratiolr == 'Recip':
+        output_file += '_reciplr'
     output_file += '.json'
     if os.path.exists(output_file):
         print(f'File {output_file} already exists')
     else:
-        options = [input_file, '-o', output_file, '--time', str(time_s), '--nlayer', str(n_layer), '--nhead', str(n_head), '--dmodel', str(d_model), '--dk', str(d_k), '--dhidden', str(d_hidden), '--mag', str(mag), '--adiv', str(adiv), '--pdiv', str(pdiv), '--fixedpos', str(fixedpos), '--layernorm', str(layernorm), '--enorm', str(enorm), '--ldiv', str(ldiv), '--batch', str(n_batch), '--gamma', str(gamma), '--ratiolr', str(ratiolr), '--lr', str(lr), '--epoch', str(epoch)]
+        options = [input_file, '-o', output_file, '--time', str(time_s), '--nlayer', str(n_layer), '--nhead', str(n_head), '--dmodel', str(d_model), '--dk', str(d_k), '--dhidden', str(d_hidden), '--mag', str(mag), '--adiv', str(adiv), '--pdiv', str(pdiv), '--fixedpos', str(fixedpos), '--layernorm', str(layernorm), '--enorm', str(enorm), '--ldiv', str(ldiv), '--batch', str(n_batch), '--gamma', str(gamma), '--ratiolr', ratiolr, '--lr', str(lr), '--epoch', str(epoch)]
         #ps = subprocess.Popen(['python', 'transformer2.py', 'slurp-out', *options], stdout=subprocess.PIPE)
         #subprocess.run(['python', 'transformer2.py', 'slurp-in', *options], stdin=ps.stdout)
         #ps.wait()
