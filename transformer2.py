@@ -187,7 +187,7 @@ def constant(value: float):
     return torch.nn.Parameter(torch.tensor(value, dtype=torch.float32), requires_grad=False)
 
 class TransformerModel(torch.nn.Module):
-    def __init__(self, n_layer: int, n_head: int, n_dict: int, d_model: int, d_k: int, d_hidden: int, n_context: int, mag: float, adiv: float, pdiv: float, fixedpos: Literal['True','False','None','FromZero'], layernorm: Literal['True','False','Affine'], enorm: Literal['True','False','Affine'], ldiv: float, vsmall: bool):
+    def __init__(self, n_layer: int, n_head: int, n_dict: int, d_model: int, d_k: int, d_hidden: int, n_context: int, mag: float, adiv: float, pdiv: float, fixedpos: Literal['True','False','None','FromZero'], layernorm: Literal['True','False','Affine'], enorm: Literal['True','False','Affine'], ldiv: float, vsmall: int):
         super().__init__()
         self.embedding = param(n_dict, d_model, mag=mag)
         if fixedpos == 'True':
@@ -208,9 +208,9 @@ class TransformerModel(torch.nn.Module):
         if d_k > 0:
             self.wq = param(n_layer, n_head, d_model, d_k, mag=mag)
             self.wk = param(n_layer, n_head, d_model, d_k, mag=mag)
-            if vsmall:
-                self.wv = param(n_layer, n_head, d_model, d_k, mag=mag)
-                self.wo = param(n_layer, n_head, d_k, d_model, mag=mag)
+            if vsmall > 0:
+                self.wv = param(n_layer, n_head, d_model, vsmall, mag=mag)
+                self.wo = param(n_layer, n_head, vsmall, d_model, mag=mag)
             else:
                 self.wv = param(n_layer, n_head, d_model, d_model, mag=mag)
         self.mlp0 = param(n_layer, d_model, d_hidden, mag=mag)
@@ -258,7 +258,7 @@ class TransformerModel(torch.nn.Module):
                 attn = torch.tril(attn)
                 attn = attn / (attn.sum(dim=-1, keepdim=True) + 1e-10)
                 vsum = torch.einsum('bhto,bhov->btv', attn, v)
-                if self.vsmall:
+                if self.vsmall > 0:
                     vsum = torch.einsum('btv,hvd->btd', vsum, self.wo[layer])
                 x = x + vsum * self.amul
                 if self.layernorm != 'False':
@@ -470,7 +470,7 @@ def main():
     parser.add_argument('--ratiolr', type=str, default='False')
     parser.add_argument('--gamma', type=float, default=0)
     parser.add_argument('--epoch', type=int, default=10000)
-    parser.add_argument('--vsmall', type=str, default='False')
+    parser.add_argument('--vsmall', type=int, default=0)
     args = parser.parse_args()
     input_filename = args.input_file
     dict_filename = f'{input_filename}.dictionary'
@@ -488,7 +488,7 @@ def main():
     d_model = args.dmodel
     d_k = args.dk
     d_hidden = args.dhidden
-    vsmall = args.vsmall == 'True'
+    vsmall = args.vsmall
 
     torch.manual_seed(12345)
     if args.command in ['slurp-in', 'train', 'mmap', 'mem']:
