@@ -187,7 +187,7 @@ def constant(value: float):
     return torch.nn.Parameter(torch.tensor(value, dtype=torch.float32), requires_grad=False)
 
 class TransformerModel(torch.nn.Module):
-    def __init__(self, n_layer: int, n_head: int, n_dict: int, d_model: int, d_k: int, d_hidden: int, n_context: int, mag: float, adiv: float, pdiv: float, fixedpos: Literal['True','False','None','FromZero'], layernorm: Literal['True','False','Affine'], enorm: Literal['True','False','Affine'], ldiv: float):
+    def __init__(self, n_layer: int, n_head: int, n_dict: int, d_model: int, d_k: int, d_hidden: int, n_context: int, mag: float, adiv: float, pdiv: float, fixedpos: Literal['True','False','None','FromZero'], layernorm: Literal['True','False','Affine'], enorm: Literal['True','False','Affine'], ldiv: float, vsmall: bool):
         super().__init__()
         self.embedding = param(n_dict, d_model, mag=mag)
         if fixedpos == 'True':
@@ -208,7 +208,11 @@ class TransformerModel(torch.nn.Module):
         if d_k > 0:
             self.wq = param(n_layer, n_head, d_model, d_k, mag=mag)
             self.wk = param(n_layer, n_head, d_model, d_k, mag=mag)
-            self.wv = param(n_layer, n_head, d_model, d_model, mag=mag)
+            if vsmall:
+                self.wv = param(n_layer, n_head, d_model, d_k, mag=mag)
+                self.wo = param(n_layer, n_head, d_k, d_model, mag=mag)
+            else:
+                self.wv = param(n_layer, n_head, d_model, d_model, mag=mag)
         self.mlp0 = param(n_layer, d_model, d_hidden, mag=mag)
         self.mlpb = param(n_layer, 1, d_hidden, mag=mag)
         self.mlp1 = param(n_layer, d_hidden, d_model, mag=mag)
@@ -234,6 +238,7 @@ class TransformerModel(torch.nn.Module):
             self.enorms = torch.nn.LayerNorm(d_model)
         self.enorm = enorm
         self.lmul = constant(1/ldiv)
+        self.vsmall = vsmall
 
     def forward(self, x: torch.Tensor, last_only: bool, capture_stats: bool) -> tuple[torch.Tensor, list]:
         x = torch.nn.functional.embedding(x.long(), self.embedding) + self.pos_embedding[:, :x.shape[1], :]
@@ -253,6 +258,8 @@ class TransformerModel(torch.nn.Module):
                 attn = torch.tril(attn)
                 attn = attn / (attn.sum(dim=-1, keepdim=True) + 1e-10)
                 vsum = torch.einsum('bhto,bhov->btv', attn, v)
+                if self.vsmall:
+                    vsum = torch.einsum('btv,hvd->btd', vsum, self.wo[layer])
                 x = x + vsum * self.amul
                 if self.layernorm != 'False':
                     x = self.layernorms0[layer](x) * self.lmul
@@ -463,6 +470,7 @@ def main():
     parser.add_argument('--ratiolr', type=str, default='False')
     parser.add_argument('--gamma', type=float, default=0)
     parser.add_argument('--epoch', type=int, default=10000)
+    parser.add_argument('--vsmall', type=str, default='False')
     args = parser.parse_args()
     input_filename = args.input_file
     dict_filename = f'{input_filename}.dictionary'
@@ -480,6 +488,7 @@ def main():
     d_model = args.dmodel
     d_k = args.dk
     d_hidden = args.dhidden
+    vsmall = args.vsmall == 'True'
 
     torch.manual_seed(12345)
     if args.command in ['slurp-in', 'train', 'mmap', 'mem']:
@@ -488,7 +497,7 @@ def main():
         if args.gencompress:
             gen_compress(vbatch, vmask, tokenizer, input_filename)
         vcompress, vcmask, vbits = load_compress(input_filename, tokenizer, n_context, device)
-        model = TransformerModel(n_layer, n_head, n_dict, d_model, d_k, d_hidden, n_context, args.mag, args.adiv, args.pdiv, args.fixedpos, args.layernorm, args.enorm, args.ldiv).to(device)
+        model = TransformerModel(n_layer, n_head, n_dict, d_model, d_k, d_hidden, n_context, args.mag, args.adiv, args.pdiv, args.fixedpos, args.layernorm, args.enorm, args.ldiv, vsmall).to(device)
 
     if args.command in ['slurp-out', 'train']:
         slurper = DataSlurper(input_filename, 'train', device, n_batch, n_context)
@@ -523,7 +532,7 @@ def main():
 
     ratiolr = args.ratiolr == 'True'
     reciplr = args.ratiolr == 'Recip'
-    print(f"Training with time={args.time} n_layer={n_layer}, n_head={n_head}, n_batch={n_batch}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}, adiv={args.adiv}, pdiv={args.pdiv}, fixedpos={args.fixedpos}, layernorm={args.layernorm}, enorm={args.enorm}, ldiv={args.ldiv}, gamma={args.gamma}, ratiolr={ratiolr}, reciplr={reciplr} lr={args.lr}, epoch={args.epoch}")
+    print(f"Training with time={args.time} n_layer={n_layer}, n_head={n_head}, n_batch={n_batch}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}, adiv={args.adiv}, pdiv={args.pdiv}, fixedpos={args.fixedpos}, layernorm={args.layernorm}, enorm={args.enorm}, ldiv={args.ldiv}, gamma={args.gamma}, ratiolr={ratiolr}, reciplr={reciplr} lr={args.lr}, epoch={args.epoch}, vsmall={vsmall}")
     losses = train(model, slurper, args.time, vbatch, vmask, device, tokenizer, vcompress, vcmask, vbits, args.gamma, ratiolr, reciplr, args.lr, args.epoch)
     predictions = final_predictions(model, tokenizer, vbatch)
     with open(args.o, 'w') as f:
