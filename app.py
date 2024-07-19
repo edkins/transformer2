@@ -3,56 +3,63 @@ from transformer2 import TransformerModel, Tokenizer, predict_slow
 from flask import Flask, make_response, request
 import os
 
-model = None
-tokenizer = None
-hyper = None
+model = {}
+tokenizer = {}
+hyper = {}
 
-def load():
+def load(name: str):
     global model
     global tokenizer
     global hyper
 
-    if model is not None:
-        return model, tokenizer, hyper
+    if name in model:
+        return model[name], tokenizer[name], hyper[name]
 
-    model_file = os.environ['MODEL']
+    model_file = f'data/{name}.model'
     print(f'Loading model {model_file}')
     with open(model_file, 'rb') as f:
         things = torch.load(f)
-        hyper = things['hyper']
-        n_context = hyper['n_context']
-        model = TransformerModel(
-            n_layer = hyper['n_layer'],
-            n_head = hyper['n_head'],
-            n_dict = hyper['n_dict'],
-            d_model = hyper['d_model'],
-            d_k = hyper['d_k'],
-            d_hidden = hyper['d_hidden'],
+        h = things['hyper']
+        hyper[name] = h
+        n_context = h['n_context']
+        model[name] = TransformerModel(
+            n_layer = h['n_layer'],
+            n_head = h['n_head'],
+            n_dict = h['n_dict'],
+            d_model = h['d_model'],
+            d_k = h['d_k'],
+            d_hidden = h['d_hidden'],
             n_context = n_context,
-            mag = hyper['mag'],
-            adiv = hyper['adiv'],
-            pdiv = hyper['pdiv'],
-            fixedpos = hyper['fixedpos'],
-            layernorm = hyper['layernorm'],
-            enorm = hyper['enorm'],
-            ldiv = hyper['ldiv'],
-            vsmall = hyper['vsmall'],
+            mag = h['mag'],
+            adiv = h['adiv'],
+            pdiv = h['pdiv'],
+            fixedpos = h['fixedpos'],
+            layernorm = h['layernorm'],
+            enorm = h['enorm'],
+            ldiv = h['ldiv'],
+            vsmall = h['vsmall'],
         )
-        model.load_state_dict(things['model'])
+        model[name].load_state_dict(things['model'])
 
-    tokenizer = Tokenizer(tokens=things['dictionary'])
-    return model, tokenizer, hyper
+    tokenizer[name] = Tokenizer(tokens=things['dictionary'])
+    return model[name], tokenizer[name], hyper[name]
 
 app = Flask(__name__)
-load()
 
 @app.get('/')
 def index():
     return app.redirect('/static/index.html')
 
+@app.get('/api/models')
+def models():
+    with os.scandir('data') as it:
+        return {
+            'models': list(sorted(entry.name[:-len('.model')] for entry in it if entry.is_file() and entry.name.endswith('.model')))
+        }
+
 @app.post('/api/tokenize')
 def tokenize():
-    model, tokenizer, hyper = load()
+    model, tokenizer, hyper = load(request.json['model'])
     tokens = tokenizer.encode_slow(request.json['prompt'])
     return {
         'tokens': [
@@ -66,12 +73,12 @@ def tokenize():
 
 @app.post('/api/hyper')
 def hyperparams():
-    model, tokenizer, hyper = load()
+    model, tokenizer, hyper = load(request.json['model'])
     return hyper
 
 @app.post('/api/attention')
 def attention():
-    model, tokenizer, hyper = load()
+    model, tokenizer, hyper = load(request.json['model'])
     tokens = tokenizer.encode_slow(request.json['prompt'])
     _, attns = model(tokens.reshape(1,-1), capture='attn')
     attn_bytes = attns.to(torch.float32).reshape(-1).detach().cpu().numpy().tobytes()

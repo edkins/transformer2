@@ -57,14 +57,15 @@ class TokenGadget {
         this.n = n;
     }
 
-    async run(prompt, prompt2, t0, t1) {
-        const p = [prompt, prompt2][this.n];
+    async run(prompt0, prompt1, model0, model1, t0, t1) {
+        const p = [prompt0, prompt1][this.n];
+        const m = [model0, model1][this.n];
         const response = await fetch("/api/tokenize", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
             },
-            body: JSON.stringify({prompt: p}),
+            body: JSON.stringify({prompt: p, model: m}),
         });
         if (!response.ok) {
             throw new Error(`Failed to tokenize: ${response.statusText}`);
@@ -92,13 +93,13 @@ class AttnGadget {
         this.diff = diff;
     }
 
-    async run(prompt, prompt2, t0, t1) {
+    async run(prompt0, prompt1, model0, model1, t0, t1) {
         const response = await fetch("/api/attention", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
             },
-            body: JSON.stringify({prompt: prompt}),
+            body: JSON.stringify({prompt: prompt0, model: model0}),
         });
         if (!response.ok) {
             throw new Error(`Failed to get attention: ${response.statusText}`);
@@ -119,7 +120,7 @@ class AttnGadget {
                 headers: {
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify({prompt: prompt2}),
+                body: JSON.stringify({prompt: prompt1, model: model1}),
             });
             if (!response2.ok) {
                 throw new Error(`Failed to get attention: ${response2.statusText}`);
@@ -186,12 +187,14 @@ class GadgetHolder {
             return;
         }
         running = true;
-        const prompt = document.getElementById("prompt").value;
-        const prompt2 = document.getElementById("prompt2").value;
+        const prompt0 = document.getElementById("prompt0").value;
+        const prompt1 = document.getElementById("prompt1").value;
+        const model0 = document.getElementById("model0").value;
+        const model1 = document.getElementById("model1").value;
         const div = document.createElement('div');
         for (const gadget of this.gadgets) {
             const thing = this;
-            const gdiv = await gadget.run(prompt, prompt2, t0, t1);
+            const gdiv = await gadget.run(prompt0, prompt1, model0, model1, t0, t1);
             const xdiv = document.createElement('div');
             const xbutton = document.createElement('button');
             xbutton.className = 'x';
@@ -232,14 +235,47 @@ async function highlight_token_pair(t0, t1) {
     await gadgetHolder.run(t0, t1);
 }
 
+async function load() {
+    const response = await fetch("/api/models");
+    if (!response.ok) {
+        alert(`Failed to get models: ${response.statusText}`);
+    }
+    const {models} = await response.json();
+    const sel0 = document.getElementById("model0");
+    const sel1 = document.getElementById("model1");
+    sel0.innerHTML = "";
+    sel1.innerHTML = "";
+    for (const model of models) {
+        const option0 = document.createElement('option');
+        option0.value = model;
+        option0.textContent = model;
+        sel0.appendChild(option0);
+        const option1 = document.createElement('option');
+        option1.value = model;
+        option1.textContent = model;
+        sel1.appendChild(option1);
+    }
+    await handle_prompt();
+}
+
+window.onload = load;
+
 </script>
 </head>
 <body>
 <div>
-<textarea id="prompt" value="" onkeyup="handle_prompt()" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+<select id="model0" onchange="handle_prompt()" autocomplete="off">
+</select>
+<br>
+<textarea id="prompt0" value="" onkeyup="handle_prompt()" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
 </textarea>
-<textarea id="prompt2" value="" onkeyup="handle_prompt()" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+<br>
+<select id="model1" onchange="handle_prompt()" autocomplete="off">
+</select>
+<br>
+<textarea id="prompt1" value="" onkeyup="handle_prompt()" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
 </textarea>
+<br>
 </div>
 <div>
 <button onclick="gadgetHolder.add(new TokenGadget(0))">Tokenizer 0</button>
