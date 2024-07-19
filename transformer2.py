@@ -554,10 +554,12 @@ def main():
         'recip_lr': reciplr,
         'lr': args.lr,
         'epoch': args.epoch,
+        'n_context': n_context,
+        'vsmall': vsmall,
     }
     if args.save != '':
         with open(args.save, 'wb') as f:
-            torch.save({'hyper':hyper, 'model': model.state_dict()}, f)
+            torch.save({'hyper':hyper, 'model': model.state_dict(), 'dictionary': tokenizer.tokens}, f)
     predictions = final_predictions(model, tokenizer, vbatch)
     with open(args.o, 'w') as f:
         json.dump({

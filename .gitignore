@@ -2,3 +2,4 @@
 /env/
 /garbage*
 /data/
+__pycache__/
