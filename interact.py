@@ -11,7 +11,7 @@ def main():
     with open(args.model, 'rb') as f:
         things = torch.load(f)
         hyper = things['hyper']
-        n_context = 128 #hyper['n_context']
+        n_context = hyper['n_context']
         model = TransformerModel(
             n_layer = hyper['n_layer'],
             n_head = hyper['n_head'],
@@ -27,7 +27,7 @@ def main():
             layernorm = hyper['layernorm'],
             enorm = hyper['enorm'],
             ldiv = hyper['ldiv'],
-            vsmall = 0, #hyper['vsmall'],
+            vsmall = hyper['vsmall'],
         )
         model.load_state_dict(things['model'])
 
