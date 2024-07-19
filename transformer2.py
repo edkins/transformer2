@@ -535,32 +535,33 @@ def main():
     reciplr = args.ratiolr == 'Recip'
     print(f"Training with time={args.time} n_layer={n_layer}, n_head={n_head}, n_batch={n_batch}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}, adiv={args.adiv}, pdiv={args.pdiv}, fixedpos={args.fixedpos}, layernorm={args.layernorm}, enorm={args.enorm}, ldiv={args.ldiv}, gamma={args.gamma}, ratiolr={ratiolr}, reciplr={reciplr} lr={args.lr}, epoch={args.epoch}, vsmall={vsmall}")
     losses = train(model, slurper, args.time, vbatch, vmask, device, tokenizer, vcompress, vcmask, vbits, args.gamma, ratiolr, reciplr, args.lr, args.epoch)
+    hyper = {
+        'n_layer': n_layer,
+        'n_head': n_head,
+        'd_model': d_model,
+        'd_k': d_k,
+        'd_hidden': d_hidden,
+        'n_dict': n_dict,
+        'mag': args.mag,
+        'adiv': args.adiv,
+        'pdiv': args.pdiv,
+        'fixedpos': args.fixedpos,
+        'layernorm': args.layernorm,
+        'enorm': args.enorm,
+        'ldiv': args.ldiv,
+        'gamma': args.gamma,
+        'ratio_lr': ratiolr,
+        'recip_lr': reciplr,
+        'lr': args.lr,
+        'epoch': args.epoch,
+    }
     if args.save != '':
         with open(args.save, 'wb') as f:
-            torch.save(model.state_dict(), f)
+            torch.save({'hyper':hyper, 'model': model.state_dict()}, f)
     predictions = final_predictions(model, tokenizer, vbatch)
     with open(args.o, 'w') as f:
         json.dump({
-            'hyper': {
-                'n_layer': n_layer,
-                'n_head': n_head,
-                'd_model': d_model,
-                'd_k': d_k,
-                'd_hidden': d_hidden,
-                'n_dict': n_dict,
-                'mag': args.mag,
-                'adiv': args.adiv,
-                'pdiv': args.pdiv,
-                'fixedpos': args.fixedpos,
-                'layernorm': args.layernorm,
-                'enorm': args.enorm,
-                'ldiv': args.ldiv,
-                'gamma': args.gamma,
-                'ratio_lr': ratiolr,
-                'recip_lr': reciplr,
-                'lr': args.lr,
-                'epoch': args.epoch,
-            },
+            'hyper': hyper,
             'losses': losses,
             'final_predictions': predictions,
         }, f, indent=2)
