@@ -7,53 +7,126 @@
 body {
     font-family: sans-serif;
 }
+div.tokenholder {
+    padding: 0.5em;
+    display: inline-block;
+}
 textarea {
     width: 100%;
     box-sizing: border-box;
     padding: 0.5em;
-    margin: 0.5em 0;
+    margin: 0.5em 0.5em;
 }
 span.token {
     padding: 0.2em;
-    margin: 0.2em;
+    margin: 0.5em 0.2em;
     border: 1px solid #668;
     border-radius: 0.2em;
     background-color: #ccf;
     white-space: pre;
 }
+button {
+    padding: 0.5em;
+    margin: 0.5em 0.5em;
+}
+button.x {
+    color: red;
+}
 </style>
 <script>
 "use strict";
 
-async function tokenize() {
-    const prompt = document.getElementById("prompt").value;
-    const response = await fetch("/api/tokenize", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify({prompt: prompt}),
-    });
-    if (!response.ok) {
-        console.error(response);
-        return;
+let running = false;
+let queued = false;
+
+class TokenGadget {
+    constructor() {}
+
+    async run(prompt) {
+        const response = await fetch("/api/tokenize", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({prompt: prompt}),
+        });
+        if (!response.ok) {
+            throw new Error(`Failed to tokenize: ${response.statusText}`);
+        }
+        const {tokens} = await response.json();
+        const tokensDiv = document.createElement('div');
+        tokensDiv.className = "tokenholder";
+        for (const token of tokens) {
+            const tokenDiv = document.createElement("span");
+            tokenDiv.className = "token";
+            tokenDiv.textContent = token.name;
+            tokensDiv.appendChild(tokenDiv);
+        }
+        return tokensDiv;
     }
-    const {tokens} = await response.json();
-    const tokensDiv = document.getElementById("tokens");
-    tokensDiv.innerHTML = "";
-    for (const token of tokens) {
-        const tokenDiv = document.createElement("span");
-        tokenDiv.className = "token";
-        tokenDiv.textContent = token.name;
-        tokensDiv.appendChild(tokenDiv);
+}
+
+class GadgetHolder {
+    constructor() {
+        this.gadgets = [new TokenGadget()];
     }
+
+    async run() {
+        if (running) {
+            queued = true;
+            return;
+        }
+        running = true;
+        const prompt = document.getElementById("prompt").value;
+        const div = document.createElement('div');
+        for (const gadget of this.gadgets) {
+            const thing = this;
+            const gdiv = await gadget.run(prompt);
+            const xdiv = document.createElement('div');
+            const xbutton = document.createElement('button');
+            xbutton.className = 'x';
+            xbutton.textContent = "X";
+            xbutton.onclick = function() {console.log('foo'); thing.remove(gadget); return true};
+            xdiv.appendChild(xbutton);
+            xdiv.appendChild(gdiv);
+            div.appendChild(xdiv);
+        }
+        const holderDiv = document.getElementById("gadgets");
+        holderDiv.innerHTML = "";
+        holderDiv.appendChild(div);
+        running = false;
+        if (queued) {
+            queued = false;
+            await this.run();
+        }
+    }
+
+    async add(gadget) {
+        this.gadgets.push(gadget);
+        await this.run();
+    }
+
+    async remove(gadget) {
+        this.gadgets = this.gadgets.filter(g => g !== gadget);
+        await this.run();
+    }
+}
+
+const gadgetHolder = new GadgetHolder();
+
+async function handle_prompt() {
+    await gadgetHolder.run();
 }
 </script>
 </head>
 <body>
-<textarea id="prompt" value="" onchange="tokenize()" onkeyup="tokenize()" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+<div>
+<textarea id="prompt" value="" onkeyup="handle_prompt()" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
 </textarea>
-<br>
-<div id="tokens"></div>
+</div>
+<div>
+<button onclick="gadgetHolder.add(new TokenGadget())">Tokenizer</button>
+</div>
+<div id="gadgets"></div>
 </body>
 </html>

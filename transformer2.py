@@ -7,7 +7,7 @@ import os
 import sys
 import time
 import torch
-from typing import Literal
+from typing import Any, Literal
 
 class StdinSlurper:
     def __init__(self, device: str, n_batch: int, n_context: int):
@@ -256,13 +256,15 @@ class TransformerModel(torch.nn.Module):
         self.lmul = constant(1/ldiv)
         self.vsmall = vsmall
 
-    def forward(self, x: torch.Tensor, last_only: bool, capture_stats: bool) -> tuple[torch.Tensor, list]:
+    def forward(self, x: torch.Tensor, last_only: bool=False, capture: str=None) -> tuple[torch.Tensor, Any]:
         x = torch.nn.functional.embedding(x.long(), self.embedding) + self.pos_embedding[:, :x.shape[1], :]
         if self.enorm != 'False':
             x = self.enorms(x) * self.lmul
 
-        if capture_stats:
+        if capture == 'stats':
             stats = [['embed',x.norm().item()]]
+        if capture == 'attn':
+            attns = torch.zeros((self.n_layer, x.shape[0], self.n_head, x.shape[1], x.shape[1]), device=x.device, dtype=torch.float32)
         for layer in range(self.n_layer):
             if self.d_k > 0:
                 # attention
@@ -273,13 +275,15 @@ class TransformerModel(torch.nn.Module):
                 attn = torch.exp(attn.clamp(max=50))
                 attn = torch.tril(attn)
                 attn = attn / (attn.sum(dim=-1, keepdim=True) + 1e-10)
+                if capture == 'attn':
+                    attns[layer] = attn
                 vsum = torch.einsum('bhto,bhov->btv', attn, v)
                 if self.vsmall > 0:
                     vsum = torch.einsum('btv,hvd->btd', vsum, self.wo[layer])
                 x = x + vsum * self.amul
                 if self.layernorm != 'False':
                     x = self.layernorms0[layer](x) * self.lmul
-                if capture_stats:
+                if capture == 'stats':
                     stats.append([f'vsum{layer}',vsum.norm().item()])
                     stats.append([f'r_mid{layer}',x.norm().item()])
 
@@ -290,15 +294,17 @@ class TransformerModel(torch.nn.Module):
             x = x + y * self.pmul
             if self.layernorm != 'False':
                 x = self.layernorms1[layer](x) * self.lmul
-            if capture_stats:
+            if capture == 'stats':
                 stats.append([f'y{layer}',y.norm().item()])
                 stats.append([f'r_end{layer}',x.norm().item()])
 
         if last_only:
             x = x[:,-1:,:]
         result = torch.einsum('btm,md->btd', x, self.unembedding) + self.bias
-        if capture_stats:
+        if capture == 'stats':
             return result, stats
+        elif capture == 'attn':
+            return result, attns
         else:
             return result, None
 
@@ -309,7 +315,7 @@ def validation(model, vdata, vmask):
         for i in range(0, len(vdata), 4):
             batch = vdata[i:i+4]
             mask = vmask[i:i+4]
-            y, stats = model(batch,False,True)
+            y, stats = model(batch,capture='stats')
             mr = mask[:,1:].reshape(-1)
             yr = y[:,:-1,:].reshape(-1, y.shape[-1])[mr]
             br = batch[:,1:].reshape(-1).long()[mr]
@@ -338,7 +344,7 @@ def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, v
     target_i = epoch
     while time.monotonic() - start_time < time_s:
         batch, mask = slurper.batch()
-        y,_ = model(batch,False,False)
+        y,_ = model(batch)
         mr = mask[:,1:].reshape(-1)
         yr = y[:,:-1,:].reshape(-1, y.shape[-1])[mr]
         br = batch[:,1:].reshape(-1).long()[mr]
@@ -391,7 +397,7 @@ def compression_ratio(model: TransformerModel, vbatch_data: torch.Tensor, vmask_
         for i in range(0, len(vbatch_data), 4):
             vbatch = vbatch_data[i:i+4]
             vmask = vmask_data[i:i+4]
-            y,_ = model(vbatch,False,False)
+            y,_ = model(vbatch)
             mr = vmask[:,1:].reshape(-1)
             logprobs = torch.nn.functional.log_softmax(y, dim=-1) / math.log(2)
             #lpr = torch.nn.functional.embedding(vbatch.long(), logprobs)
@@ -412,7 +418,7 @@ def predict_slow(model, prompt_tokens, n_tokens, temperature=0):
     prompt = prompt_tokens.reshape(1,-1)
     with torch.no_grad():
         for i in range(n_tokens):
-            y,_ = model(prompt,True,False)
+            y,_ = model(prompt,last_only=True)
             if temperature == 0:
                 next_token = torch.argmax(y[0,-1,:]).to(torch.int16)
             else:

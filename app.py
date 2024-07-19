@@ -1,6 +1,6 @@
 import torch
 from transformer2 import TransformerModel, Tokenizer, predict_slow
-from flask import Flask, request
+from flask import Flask, make_response, request
 import os
 
 model = None
@@ -63,3 +63,16 @@ def tokenize():
             for token in tokens
         ]
     }
+
+@app.post('/api/hyper')
+def hyper():
+    model, tokenizer, hyper = load()
+    return hyper
+
+@app.post('/api/attention')
+def attention():
+    model, tokenizer, hyper = load()
+    tokens = tokenizer.encode_slow(request.json['prompt'])
+    _, attns = model(tokens.reshape(1,-1))
+    attn_bytes = attns.detach().cpu().numpy().tobytes()
+    return make_response(attn_bytes)
