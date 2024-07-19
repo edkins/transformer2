@@ -65,7 +65,7 @@ def tokenize():
     }
 
 @app.post('/api/hyper')
-def hyper():
+def hyperparams():
     model, tokenizer, hyper = load()
     return hyper
 
@@ -73,6 +73,11 @@ def hyper():
 def attention():
     model, tokenizer, hyper = load()
     tokens = tokenizer.encode_slow(request.json['prompt'])
-    _, attns = model(tokens.reshape(1,-1))
-    attn_bytes = attns.detach().cpu().numpy().tobytes()
-    return make_response(attn_bytes)
+    _, attns = model(tokens.reshape(1,-1), capture='attn')
+    attn_bytes = attns.to(torch.float32).reshape(-1).detach().cpu().numpy().tobytes()
+    return make_response(attn_bytes, 200, {
+        'Content-Type': 'application/octet-stream',
+        'X-heads': str(hyper['n_head']),
+        'X-layers': str(hyper['n_layer']),
+        'X-tokens': str(len(tokens)),
+    })
