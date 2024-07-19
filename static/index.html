@@ -43,15 +43,16 @@ let running = false;
 let queued = false;
 
 class TokenGadget {
-    constructor() {}
+    constructor(n) {this.n = n;}
 
-    async run(prompt) {
+    async run(prompt, prompt2) {
+        const p = [prompt, prompt2][this.n];
         const response = await fetch("/api/tokenize", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
             },
-            body: JSON.stringify({prompt: prompt}),
+            body: JSON.stringify({prompt: p}),
         });
         if (!response.ok) {
             throw new Error(`Failed to tokenize: ${response.statusText}`);
@@ -70,9 +71,11 @@ class TokenGadget {
 }
 
 class AttnGadget {
-    constructor() {}
+    constructor(diff) {
+        this.diff = diff;
+    }
 
-    async run(prompt) {
+    async run(prompt, prompt2) {
         const response = await fetch("/api/attention", {
             method: "POST",
             headers: {
@@ -83,29 +86,55 @@ class AttnGadget {
         if (!response.ok) {
             throw new Error(`Failed to get attention: ${response.statusText}`);
         }
+
         const n_layer = parseInt(response.headers.get("X-layers"));
         const n_head = parseInt(response.headers.get("X-heads"));
         const n_token = parseInt(response.headers.get("X-tokens"));
         const bytes = await response.arrayBuffer();
         const view = new DataView(bytes);
 
+        let view2 = undefined;
+        let max_token = n_token;
+        let n_token2 = undefined;
+        if (this.diff) {
+            const response2 = await fetch("/api/attention", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({prompt: prompt2}),
+            });
+            if (!response2.ok) {
+                throw new Error(`Failed to get attention: ${response2.statusText}`);
+            }
+            n_token2 = parseInt(response2.headers.get("X-tokens"));
+            const bytes2 = await response2.arrayBuffer();
+            view2 = new DataView(bytes2);
+            max_token = Math.max(n_token, n_token2);
+        }
+
         const canvas = document.createElement('canvas');
-        canvas.width = 10 * (n_token + 1) * n_head;
-        canvas.height = 10 * (n_token + 1) * n_layer;
+        canvas.width = 10 * (max_token + 1) * n_head;
+        canvas.height = 10 * (max_token + 1) * n_layer;
         const ctx = canvas.getContext('2d');
         for (let layer = 0; layer < n_layer; layer++) {
             for (let head = 0; head < n_head; head++) {
-                for (let t0 = 0; t0 < n_token; t0++) {
-                    // let sum = 0;
-                    for (let t1 = 0; t1 < n_token; t1++) {
-                        const value = view.getFloat32(4 * (t1 + n_token * (t0 + n_token * (head + n_head * layer))), true);
-                        // sum += value;
-                        const v = Math.pow(value, 0.8)*255;
-                        ctx.fillStyle = `rgb(${v}, ${v}, ${v})`;
-                        ctx.fillRect(10 * (head * (n_token + 1) + t1), 10 * (layer * (n_token + 1) + t0), 10, 10);
+                for (let t0 = 0; t0 < max_token; t0++) {
+                    for (let t1 = 0; t1 < max_token; t1++) {
+                        let r = 0;
+                        let g = 0;
+                        let b = 0;
+                        if (t0 < n_token && t1 < n_token) {
+                            const value = view.getFloat32(4 * (t1 + n_token * (t0 + n_token * (head + n_head * layer))), true);
+                            g = Math.pow(value, 0.8)*255;
+                        }
+                        if (this.diff && t0 < n_token2 && t1 < n_token2) {
+                            const value = view2.getFloat32(4 * (t1 + n_token2 * (t0 + n_token2 * (head + n_head * layer))), true);
+                            r = Math.pow(value, 0.8)*255;
+                        }
+                        ctx.fillStyle = `rgb(${r}, ${g}, ${0})`;
+                        ctx.fillRect(10 * (head * (max_token + 1) + t1), 10 * (layer * (max_token + 1) + t0), 10, 10);
                     }
-                    // ctx.fillStyle = `rgb(${sum*255}, 0, 0)`;
-                    // ctx.fillRect(10 * (head * (n_token + 1) + n_token), 10 * (layer * (n_token + 1) + t0), 10, 10);
                 }
             }
         }
@@ -119,7 +148,7 @@ class AttnGadget {
 
 class GadgetHolder {
     constructor() {
-        this.gadgets = [new TokenGadget(), new AttnGadget()];
+        this.gadgets = [new TokenGadget(0), new TokenGadget(1), new AttnGadget(true)];
     }
 
     async run() {
@@ -129,10 +158,11 @@ class GadgetHolder {
         }
         running = true;
         const prompt = document.getElementById("prompt").value;
+        const prompt2 = document.getElementById("prompt2").value;
         const div = document.createElement('div');
         for (const gadget of this.gadgets) {
             const thing = this;
-            const gdiv = await gadget.run(prompt);
+            const gdiv = await gadget.run(prompt, prompt2);
             const xdiv = document.createElement('div');
             const xbutton = document.createElement('button');
             xbutton.className = 'x';
@@ -174,10 +204,14 @@ async function handle_prompt() {
 <div>
 <textarea id="prompt" value="" onkeyup="handle_prompt()" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
 </textarea>
+<textarea id="prompt2" value="" onkeyup="handle_prompt()" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+</textarea>
 </div>
 <div>
-<button onclick="gadgetHolder.add(new TokenGadget())">Tokenizer</button>
-<button onclick="gadgetHolder.add(new AttnGadget())">Attention</button>
+<button onclick="gadgetHolder.add(new TokenGadget(0))">Tokenizer 0</button>
+<button onclick="gadgetHolder.add(new TokenGadget(1))">Tokenizer 1</button>
+<button onclick="gadgetHolder.add(new AttnGadget(False))">Attention</button>
+<button onclick="gadgetHolder.add(new AttnGadget(True))">Diff</button>
 </div>
 <div id="gadgets"></div>
 </body>
