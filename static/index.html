@@ -7,12 +7,19 @@
 body {
     font-family: sans-serif;
 }
-div.tokenholder {
+div.tokenholder.p0 {
     padding: 0.5em;
     display: inline-block;
+    background: #afc;
+}
+div.tokenholder.p1 {
+    padding: 0.5em;
+    display: inline-block;
+    background: #fac;
 }
 div.canvasholder {
     background: #ccf;
+    display: inline-block;
 }
 textarea {
     width: 100%;
@@ -27,6 +34,9 @@ span.token {
     border-radius: 0.2em;
     background-color: #ccf;
     white-space: pre;
+}
+span.token.h {
+    background-color: #88f;
 }
 button {
     padding: 0.5em;
@@ -43,9 +53,11 @@ let running = false;
 let queued = false;
 
 class TokenGadget {
-    constructor(n) {this.n = n;}
+    constructor(n) {
+        this.n = n;
+    }
 
-    async run(prompt, prompt2) {
+    async run(prompt, prompt2, t0, t1) {
         const p = [prompt, prompt2][this.n];
         const response = await fetch("/api/tokenize", {
             method: "POST",
@@ -59,10 +71,15 @@ class TokenGadget {
         }
         const {tokens} = await response.json();
         const tokensDiv = document.createElement('div');
-        tokensDiv.className = "tokenholder";
-        for (const token of tokens) {
+        tokensDiv.className = `tokenholder p${this.n}`;
+        for (let i = 0; i < tokens.length; i++) {
+            const token = tokens[i];
             const tokenDiv = document.createElement("span");
-            tokenDiv.className = "token";
+            if (i === t0 || i === t1) {
+                tokenDiv.className = "token h";
+            } else {
+                tokenDiv.className = "token";
+            }
             tokenDiv.textContent = token.name;
             tokensDiv.appendChild(tokenDiv);
         }
@@ -75,7 +92,7 @@ class AttnGadget {
         this.diff = diff;
     }
 
-    async run(prompt, prompt2) {
+    async run(prompt, prompt2, t0, t1) {
         const response = await fetch("/api/attention", {
             method: "POST",
             headers: {
@@ -124,20 +141,32 @@ class AttnGadget {
                         let r = 0;
                         let g = 0;
                         let b = 0;
+                        let value = 0;
                         if (t0 < n_token && t1 < n_token) {
-                            const value = view.getFloat32(4 * (t1 + n_token * (t0 + n_token * (head + n_head * layer))), true);
+                            value = view.getFloat32(4 * (t1 + n_token * (t0 + n_token * (head + n_head * layer))), true);
                             g = Math.pow(value, 0.8)*255;
                         }
                         if (this.diff && t0 < n_token2 && t1 < n_token2) {
-                            const value = view2.getFloat32(4 * (t1 + n_token2 * (t0 + n_token2 * (head + n_head * layer))), true);
-                            r = Math.pow(value, 0.8)*255;
+                            const value2 = view2.getFloat32(4 * (t1 + n_token2 * (t0 + n_token2 * (head + n_head * layer))), true);
+                            r = Math.pow(value2, 0.8)*255;
+                            b = Math.pow((value + value2) / 2, 0.8) * 255;
                         }
-                        ctx.fillStyle = `rgb(${r}, ${g}, ${0})`;
+                        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
                         ctx.fillRect(10 * (head * (max_token + 1) + t1), 10 * (layer * (max_token + 1) + t0), 10, 10);
                     }
                 }
             }
         }
+        canvas.onmousedown = function() {
+            const size = 10 * (max_token + 1);
+            const t0 = Math.floor((event.offsetY % size) / 10);
+            const t1 = Math.floor((event.offsetX % size) / 10);
+            if (t0 >= max_token || t1 >= max_token) {
+                highlight_token_pair(undefined, undefined);
+            } else {
+                highlight_token_pair(t0, t1);
+            }
+        };
         const div = document.createElement('div');
         div.className = "canvasholder";
         div.appendChild(canvas);
@@ -151,7 +180,7 @@ class GadgetHolder {
         this.gadgets = [new TokenGadget(0), new TokenGadget(1), new AttnGadget(true)];
     }
 
-    async run() {
+    async run(t0, t1) {
         if (running) {
             queued = true;
             return;
@@ -162,7 +191,7 @@ class GadgetHolder {
         const div = document.createElement('div');
         for (const gadget of this.gadgets) {
             const thing = this;
-            const gdiv = await gadget.run(prompt, prompt2);
+            const gdiv = await gadget.run(prompt, prompt2, t0, t1);
             const xdiv = document.createElement('div');
             const xbutton = document.createElement('button');
             xbutton.className = 'x';
@@ -178,7 +207,7 @@ class GadgetHolder {
         running = false;
         if (queued) {
             queued = false;
-            await this.run();
+            await this.run(t0, t1);
         }
     }
 
@@ -196,8 +225,13 @@ class GadgetHolder {
 const gadgetHolder = new GadgetHolder();
 
 async function handle_prompt() {
-    await gadgetHolder.run();
+    await gadgetHolder.run(undefined, undefined);
 }
+
+async function highlight_token_pair(t0, t1) {
+    await gadgetHolder.run(t0, t1);
+}
+
 </script>
 </head>
 <body>

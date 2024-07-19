@@ -6,6 +6,7 @@ from transformer2 import TransformerModel, Tokenizer, predict_slow
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('model', type=str)
+    parser.add_argument('temperature', type=float)
     args = parser.parse_args()
     print(f'Loading model {args.model}')
     with open(args.model, 'rb') as f:
@@ -35,7 +36,7 @@ def main():
     while True:
         prompt = input('> ')
         prompt_tokens = tokenizer.encode_slow(prompt)
-        tokens = predict_slow(model, prompt_tokens, n_context - len(prompt_tokens))
+        tokens = predict_slow(model, prompt_tokens, n_context - len(prompt_tokens), temperature=args.temperature)
         print(tokenizer.decode(tokens))
 
 if __name__ == '__main__':
