@@ -6,6 +6,7 @@
 <style>
 body {
     font-family: sans-serif;
+    background: #444;
 }
 div.tokenholder.p0 {
     padding: 0.5em;
@@ -97,47 +98,127 @@ class TokenGadget {
     }
 }
 
-class AttnGadget {
-    constructor(diff) {
-        this.diff = diff;
-    }
+class TokenDiffGadget {
+    constructor() {}
 
     async run(prompt0, prompt1, model0, model1, t0, t1) {
-        const response = await fetch("/api/attention", {
+        const response0 = await fetch("/api/tokenize", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
             },
             body: JSON.stringify({prompt: prompt0, model: model0}),
         });
-        if (!response.ok) {
-            throw new Error(`Failed to get attention: ${response.statusText}`);
+        if (!response0.ok) {
+            throw new Error(`Failed to tokenize: ${response.statusText}`);
+        }
+        const {tokens:t0s} = await response0.json();
+
+        const response1 = await fetch("/api/tokenize", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({prompt: prompt1, model: model1}),
+        });
+        if (!response1.ok) {
+            throw new Error(`Failed to tokenize: ${response.statusText}`);
+        }
+        const {tokens:t1s} = await response1.json();
+
+        const tokensDiv = document.createElement('div');
+        tokensDiv.className = `tokenholder`;
+        const table = document.createElement('table');
+        const [r0, r1] = diff(t0s, t1s);
+        const tr0 = document.createElement('tr');
+        const tr1 = document.createElement('tr');
+        console.log(t0s);
+        console.log(t1s);
+        console.log(r0);
+        console.log(r1);
+
+        for (let i = 0; i < r0.length; i++) {
+            let val0 = '';
+            let val1 = '';
+            if (i === 0 || r0[i] !== r0[i-1]) {
+                val0 = t0s[r0[i]].name;
+            }
+            if (i === 0 || r1[i] !== r1[i-1]) {
+                val1 = t1s[r1[i]].name;
+            }
+            const td0 = document.createElement('td');
+            const td1 = document.createElement('td');
+            td0.textContent = val0;
+            td1.textContent = val1;
+            tr0.appendChild(td0);
+            tr1.appendChild(td1);
+        }
+        table.appendChild(tr0);
+        table.appendChild(tr1);
+        tokensDiv.appendChild(table);
+        return tokensDiv;
+    }
+}
+
+class AttnGadget {
+    constructor(diff) {
+        this.diff = diff;
+    }
+
+    async run(prompt0, prompt1, model0, model1, t0, t1) {
+        const response0 = await fetch("/api/attention", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({prompt: prompt0, model: model0}),
+        });
+        if (!response0.ok) {
+            throw new Error(`Failed to get attention: ${response0.statusText}`);
         }
 
-        const n_layer = parseInt(response.headers.get("X-layers"));
-        const n_head = parseInt(response.headers.get("X-heads"));
-        const n_token = parseInt(response.headers.get("X-tokens"));
-        const bytes = await response.arrayBuffer();
+        const n_layer = parseInt(response0.headers.get("X-layers"));
+        const n_head = parseInt(response0.headers.get("X-heads"));
+        const n_token = parseInt(response0.headers.get("X-tokens"));
+        const bytes = await response0.arrayBuffer();
         const view = new DataView(bytes);
 
         let view2 = undefined;
         let max_token = n_token;
         let n_token2 = undefined;
         if (this.diff) {
-            const response2 = await fetch("/api/attention", {
+            const response1 = await fetch("/api/attention", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                 },
                 body: JSON.stringify({prompt: prompt1, model: model1}),
             });
-            if (!response2.ok) {
+            if (!response1.ok) {
                 throw new Error(`Failed to get attention: ${response2.statusText}`);
             }
-            n_token2 = parseInt(response2.headers.get("X-tokens"));
-            const bytes2 = await response2.arrayBuffer();
+            n_token2 = parseInt(response1.headers.get("X-tokens"));
+            const bytes2 = await response1.arrayBuffer();
             view2 = new DataView(bytes2);
             max_token = Math.max(n_token, n_token2);
+
+            const response0b = await fetch("/api/tokenize", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({prompt: prompt0, model: model0}),
+            });
+            const {tokens:t0s} = await response0b.json();
+            const response1b = await fetch("/api/tokenize", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({prompt: prompt1, model: model1}),
+            });
+            const {tokens:t1s} = await response1b.json();
+            diff(t0s, t1s);
         }
 
         const canvas = document.createElement('canvas');
@@ -244,8 +325,8 @@ class PredictGadget {
 
 class GadgetHolder {
     constructor() {
-        //this.gadgets = [new TokenGadget(0), new TokenGadget(1), new AttnGadget(true)];
-        this.gadgets = [new PredictGadget(0), new PredictGadget(1)];
+        this.gadgets = [new TokenDiffGadget(), new AttnGadget(true)];
+        //this.gadgets = [new PredictGadget(0), new PredictGadget(1)];
     }
 
     async run(t0, t1) {
@@ -292,6 +373,80 @@ class GadgetHolder {
 }
 
 const gadgetHolder = new GadgetHolder();
+
+function diff(t0s, t1s) {
+    const scores = new Array(t0s.length + 1);
+    for (let i = 0; i <= t0s.length; i++) {
+        scores[i] = new Array(t1s.length + 1);
+        scores[i][0] = 0;
+    }
+    for (let i = 1; i <= t1s.length; i++) {
+        scores[0][i] = 0;
+    }
+
+    for (let i = 1; i <= t0s.length + t1s.length; i++) {
+        for (let j = 1; j < i; j++) {
+            let k = i - j;
+            if (j > t0s.length || k > t1s.length) {
+                continue;
+            }
+            const eq = (t0s[j-1].token === t1s[k-1].token) ? 1 : 0;
+            scores[j][k] = Math.max(scores[j - 1][k], scores[j][k - 1]) + eq;
+        }
+    }
+
+    for (const score of scores) {
+        console.log(score);
+    }
+
+    // let p0 = 1;
+    // let p1 = 1;
+    // const r0 = [];
+    // const r1 = [];
+    // while (p0 !== t0s.length || p1 !== t1s.length) {
+    //     if (p0 === t0s.length) {
+    //         r0.push(p0-1);
+    //         r1.push(p1-1);
+    //         p1++;
+    //     } else if (p1 === t1s.length) {
+    //         r0.push(p0-1);
+    //         r1.push(p1-1);
+    //         p0++;
+    //     } else if (scores[p0 + 1][p1] > scores[p0][p1 + 1]) {
+    //         r0.push(p0-1);
+    //         r1.push(p1-1);
+    //         p0++;
+    //     } else if (scores[p0 + 1][p1] < scores[p0][p1 + 1]) {
+    //         r0.push(p0-1);
+    //         r1.push(p1-1);
+    //         p1++;
+    //     } else {
+    //         r0.push(p0-1);
+    //         r1.push(p1-1);
+    //         p0++;
+    //         p1++;
+    //     }
+    // }
+    // r0.push(t0s.length-1);
+    // r1.push(t1s.length-1);
+    let p0 = t0s.length;
+    let p1 = t1s.length;
+    let r0 = [];
+    let r1 = [];
+    while (p0 > 0 && p1 > 0) {
+        r0.splice(0, 0, p0-1);
+        r1.splice(0, 0, p1-1);
+        if (scores[p0-1][p1] > scores[p0][p1-1]) {
+            p0--;
+        } else if (scores[p0-1][p1] < scores[p0][p1-1]) {
+            p1--;
+        } else {
+            p0--;
+            p1--;
+        }
+    }
+    return [r0, r1];
+}
 
 async function handle_prompt() {
     await gadgetHolder.run(undefined, undefined);
