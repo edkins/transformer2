@@ -399,53 +399,64 @@ function diff(t0s, t1s) {
         console.log(score);
     }
 
-    // let p0 = 1;
-    // let p1 = 1;
-    // const r0 = [];
-    // const r1 = [];
-    // while (p0 !== t0s.length || p1 !== t1s.length) {
-    //     if (p0 === t0s.length) {
-    //         r0.push(p0-1);
-    //         r1.push(p1-1);
-    //         p1++;
-    //     } else if (p1 === t1s.length) {
-    //         r0.push(p0-1);
-    //         r1.push(p1-1);
-    //         p0++;
-    //     } else if (scores[p0 + 1][p1] > scores[p0][p1 + 1]) {
-    //         r0.push(p0-1);
-    //         r1.push(p1-1);
-    //         p0++;
-    //     } else if (scores[p0 + 1][p1] < scores[p0][p1 + 1]) {
-    //         r0.push(p0-1);
-    //         r1.push(p1-1);
-    //         p1++;
-    //     } else {
-    //         r0.push(p0-1);
-    //         r1.push(p1-1);
-    //         p0++;
-    //         p1++;
-    //     }
-    // }
-    // r0.push(t0s.length-1);
-    // r1.push(t1s.length-1);
     let p0 = t0s.length;
     let p1 = t1s.length;
     let r0 = [];
     let r1 = [];
     while (p0 > 0 && p1 > 0) {
-        r0.splice(0, 0, p0-1);
-        r1.splice(0, 0, p1-1);
+        const max = Math.max(scores[p0-1][p1], scores[p0][p1-1]);
+        const eq = scores[p0][p1] - max;
+        if (eq) {
+            r0.splice(0, 0, p0-1);
+            r1.splice(0, 0, p1-1);
+        }
         if (scores[p0-1][p1] > scores[p0][p1-1]) {
             p0--;
-        } else if (scores[p0-1][p1] < scores[p0][p1-1]) {
-            p1--;
         } else {
-            p0--;
             p1--;
         }
     }
-    return [r0, r1];
+    let result0 = [];
+    let result1 = [];
+    p0 = 0;
+    p1 = 0;
+    for (let i = 0; i < r0.length; i++) {
+        while (p0 < r0[i] && p1 < r1[i]) {
+            result0.push(p0);
+            result1.push(p1);
+            p0++;
+            p1++;
+        }
+        while (p0 < r0[i]) {
+            result0.push(p0);
+            result1.push(p1-1);
+            p0++;
+        }
+        while (p1 < r1[i]) {
+            result0.push(p0-1);
+            result1.push(p1);
+            p1++;
+        }
+        result0.push(p0);
+        result1.push(p1);
+    }
+    while (p0 < t0s.length && p1 < t1s.length) {
+        result0.push(p0);
+        result1.push(p1);
+        p0++;
+        p1++;
+    }
+    while (p0 < t0s.length) {
+        result0.push(p0);
+        result1.push(p1-1);
+        p0++;
+    }
+    while (p1 < t1s.length) {
+        result0.push(p0-1);
+        result1.push(p1);
+        p1++;
+    }
+    return [result0, result1];
 }
 
 async function handle_prompt() {
