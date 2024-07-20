@@ -55,6 +55,9 @@ button.x {
 td.token {
     width: 20em;
 }
+td.h {
+    background-color: #88f;
+}
 </style>
 <script>
 "use strict";
@@ -67,7 +70,7 @@ class TokenGadget {
         this.n = n;
     }
 
-    async run(prompt0, prompt1, model0, model1, t0, t1) {
+    async run(prompt0, prompt1, model0, model1, sel0s, sel1s) {
         const p = [prompt0, prompt1][this.n];
         const m = [model0, model1][this.n];
         const response = await fetch("/api/tokenize", {
@@ -86,7 +89,7 @@ class TokenGadget {
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
             const tokenDiv = document.createElement("span");
-            if (i === t0 || i === t1) {
+            if (this.n === 0 && sel0s !== undefind && sel0s.includes(i) || this.n === 1 && sel1s !== undefined && sel1s.includes(i)) {
                 tokenDiv.className = "token h";
             } else {
                 tokenDiv.className = "token";
@@ -101,7 +104,7 @@ class TokenGadget {
 class TokenDiffGadget {
     constructor() {}
 
-    async run(prompt0, prompt1, model0, model1, t0, t1) {
+    async run(prompt0, prompt1, model0, model1, sel0s, sel1s) {
         const response0 = await fetch("/api/tokenize", {
             method: "POST",
             headers: {
@@ -132,10 +135,6 @@ class TokenDiffGadget {
         const [r0, r1] = diff(t0s, t1s);
         const tr0 = document.createElement('tr');
         const tr1 = document.createElement('tr');
-        console.log(t0s);
-        console.log(t1s);
-        console.log(r0);
-        console.log(r1);
 
         for (let i = 0; i < r0.length; i++) {
             let val0 = '';
@@ -150,6 +149,12 @@ class TokenDiffGadget {
             const td1 = document.createElement('td');
             td0.textContent = val0;
             td1.textContent = val1;
+            if (sel0s !== undefined && sel0s.includes(r0[i])) {
+                td0.className = "h";
+            }
+            if (sel1s !== undefined && sel1s.includes(r1[i])) {
+                td1.className = "h";
+            }
             tr0.appendChild(td0);
             tr1.appendChild(td1);
         }
@@ -184,8 +189,9 @@ class AttnGadget {
         const view = new DataView(bytes);
 
         let view2 = undefined;
-        let max_token = n_token;
         let n_token2 = undefined;
+        let r0 = undefined;
+        let r1 = undefined;
         if (this.diff) {
             const response1 = await fetch("/api/attention", {
                 method: "POST",
@@ -200,7 +206,6 @@ class AttnGadget {
             n_token2 = parseInt(response1.headers.get("X-tokens"));
             const bytes2 = await response1.arrayBuffer();
             view2 = new DataView(bytes2);
-            max_token = Math.max(n_token, n_token2);
 
             const response0b = await fetch("/api/tokenize", {
                 method: "POST",
@@ -218,44 +223,52 @@ class AttnGadget {
                 body: JSON.stringify({prompt: prompt1, model: model1}),
             });
             const {tokens:t1s} = await response1b.json();
-            diff(t0s, t1s);
+            [r0, r1] = diff(t0s, t1s);
+        } else {
+            r0 = [];
+            for (let i = 0; i < n_token; i++) {
+                r0.push(i);
+            }
         }
 
+        const max_token = r0.length;
         const canvas = document.createElement('canvas');
         canvas.width = 10 * (max_token + 1) * n_head;
         canvas.height = 10 * (max_token + 1) * n_layer;
         const ctx = canvas.getContext('2d');
         for (let layer = 0; layer < n_layer; layer++) {
             for (let head = 0; head < n_head; head++) {
-                for (let t0 = 0; t0 < max_token; t0++) {
-                    for (let t1 = 0; t1 < max_token; t1++) {
+                for (let p0 = 0; p0 < max_token; p0++) {
+                    for (let p1 = 0; p1 < max_token; p1++) {
                         let r = 0;
                         let g = 0;
                         let b = 0;
                         let value = 0;
-                        if (t0 < n_token && t1 < n_token) {
-                            value = view.getFloat32(4 * (t1 + n_token * (t0 + n_token * (head + n_head * layer))), true);
-                            g = Math.pow(value, 0.8)*255;
-                        }
-                        if (this.diff && t0 < n_token2 && t1 < n_token2) {
-                            const value2 = view2.getFloat32(4 * (t1 + n_token2 * (t0 + n_token2 * (head + n_head * layer))), true);
+                        const t00 = r0[p0];
+                        const t01 = r0[p1];
+                        value = view.getFloat32(4 * (t01 + n_token * (t00 + n_token * (head + n_head * layer))), true);
+                        g = Math.pow(value, 0.8)*255;
+                        if (this.diff) {
+                            const t10 = r1[p0];
+                            const t11 = r1[p1];
+                            const value2 = view2.getFloat32(4 * (t11 + n_token2 * (t10 + n_token2 * (head + n_head * layer))), true);
                             r = Math.pow(value2, 0.8)*255;
                             b = Math.pow((value + value2) / 2, 0.8) * 255;
                         }
                         ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-                        ctx.fillRect(10 * (head * (max_token + 1) + t1), 10 * (layer * (max_token + 1) + t0), 10, 10);
+                        ctx.fillRect(10 * (head * (max_token + 1) + p1), 10 * (layer * (max_token + 1) + p0), 10, 10);
                     }
                 }
             }
         }
         canvas.onmousedown = function() {
             const size = 10 * (max_token + 1);
-            const t0 = Math.floor((event.offsetY % size) / 10);
-            const t1 = Math.floor((event.offsetX % size) / 10);
-            if (t0 >= max_token || t1 >= max_token) {
+            const p0 = Math.floor((event.offsetY % size) / 10);
+            const p1 = Math.floor((event.offsetX % size) / 10);
+            if (p0 >= max_token || p1 >= max_token) {
                 highlight_token_pair(undefined, undefined);
             } else {
-                highlight_token_pair(t0, t1);
+                highlight_token_pair([r0[p0], r0[p1]], [r1[p0], r1[p1]]);
             }
         };
         const div = document.createElement('div');
@@ -395,9 +408,9 @@ function diff(t0s, t1s) {
         }
     }
 
-    for (const score of scores) {
-        console.log(score);
-    }
+    // for (const score of scores) {
+    //     console.log(score);
+    // }
 
     let p0 = t0s.length;
     let p1 = t1s.length;
@@ -437,8 +450,6 @@ function diff(t0s, t1s) {
             result1.push(p1);
             p1++;
         }
-        result0.push(p0);
-        result1.push(p1);
     }
     while (p0 < t0s.length && p1 < t1s.length) {
         result0.push(p0);
