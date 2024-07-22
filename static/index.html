@@ -89,7 +89,7 @@ class TokenGadget {
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
             const tokenDiv = document.createElement("span");
-            if (this.n === 0 && sel0s !== undefind && sel0s.includes(i) || this.n === 1 && sel1s !== undefined && sel1s.includes(i)) {
+            if (this.n === 0 && sel0s !== undefined && sel0s.includes(i) || this.n === 1 && sel1s !== undefined && sel1s.includes(i)) {
                 tokenDiv.className = "token h";
             } else {
                 tokenDiv.className = "token";
@@ -192,6 +192,7 @@ class AttnGadget {
         let n_token2 = undefined;
         let r0 = undefined;
         let r1 = undefined;
+        let fail = false;
         if (this.diff) {
             const response1 = await fetch("/api/attention", {
                 method: "POST",
@@ -206,6 +207,12 @@ class AttnGadget {
             n_token2 = parseInt(response1.headers.get("X-tokens"));
             const bytes2 = await response1.arrayBuffer();
             view2 = new DataView(bytes2);
+            const n_layer2 = parseInt(response1.headers.get("X-layers"));
+            const n_head2 = parseInt(response1.headers.get("X-heads"));
+            if (n_layer2 !== n_layer || n_head2 !== n_head) {
+                console.log(`Different number of layers or heads: ${n_layer} ${n_head} ${n_layer2} ${n_head2}`);
+                fail = true;
+            }
 
             const response0b = await fetch("/api/tokenize", {
                 method: "POST",
@@ -248,7 +255,7 @@ class AttnGadget {
                         const t01 = r0[p1];
                         value = view.getFloat32(4 * (t01 + n_token * (t00 + n_token * (head + n_head * layer))), true);
                         g = Math.pow(value, 0.8)*255;
-                        if (this.diff) {
+                        if (this.diff && !fail) {
                             const t10 = r1[p0];
                             const t11 = r1[p1];
                             const value2 = view2.getFloat32(4 * (t11 + n_token2 * (t10 + n_token2 * (head + n_head * layer))), true);
@@ -267,8 +274,10 @@ class AttnGadget {
             const p1 = Math.floor((event.offsetX % size) / 10);
             if (p0 >= max_token || p1 >= max_token) {
                 highlight_token_pair(undefined, undefined);
-            } else {
+            } else if (this.diff && !fail) {
                 highlight_token_pair([r0[p0], r0[p1]], [r1[p0], r1[p1]]);
+            } else {
+                highlight_token_pair([r0[p0], r0[p1]], []);
             }
         };
         const div = document.createElement('div');

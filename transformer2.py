@@ -326,7 +326,7 @@ def validation(model, vdata, vmask):
             count += 1
         return loss.item() / count, stats
 
-def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, vcmask, vcbits, gamma, ratiolr, reciplr, lr, epoch):
+def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, vcmask, vcbits, gamma, ratiolr, reciplr, lr, epoch, hyper, save, json_save):
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     lr_mult = [1]
     if ratiolr:
@@ -342,6 +342,7 @@ def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, v
     results = []
     i = 0
     target_i = epoch
+    target_time = start_time + 300
     while time.monotonic() - start_time < time_s:
         batch, mask = slurper.batch()
         y,_ = model(batch)
@@ -383,6 +384,17 @@ def train(model, slurper, time_s, vbatch, vmask, device, tokenizer, vcompress, v
                 'stats': stats,
             })
             target_i += epoch
+            if time.monotonic() > target_time:
+                target_time += 300
+                if save != '':
+                    with open(save, 'wb') as f:
+                        torch.save({'hyper':hyper, 'model': model.state_dict(), 'dictionary': tokenizer.tokens}, f)
+                with open(json_save, 'w') as f:
+                    json.dump({
+                        'hyper': hyper,
+                        'losses': results,
+                    }, f, indent=2)
+                print("Saved")
     return results
 
 def compression_ratio(model: TransformerModel, vbatch_data: torch.Tensor, vmask_data: torch.Tensor, vbits: int) -> float:
@@ -556,7 +568,6 @@ def main():
     ratiolr = args.ratiolr == 'True'
     reciplr = args.ratiolr == 'Recip'
     print(f"Training with time={args.time} n_layer={n_layer}, n_head={n_head}, n_batch={n_batch}, d_model={d_model}, d_k={d_k}, d_hidden={d_hidden}, mag={args.mag}, adiv={args.adiv}, pdiv={args.pdiv}, fixedpos={args.fixedpos}, layernorm={args.layernorm}, enorm={args.enorm}, ldiv={args.ldiv}, gamma={args.gamma}, ratiolr={ratiolr}, reciplr={reciplr} lr={args.lr}, epoch={args.epoch}, vsmall={vsmall}")
-    losses = train(model, slurper, args.time, vbatch, vmask, device, tokenizer, vcompress, vcmask, vbits, args.gamma, ratiolr, reciplr, args.lr, args.epoch)
     hyper = {
         'n_layer': n_layer,
         'n_head': n_head,
@@ -579,6 +590,7 @@ def main():
         'n_context': n_context,
         'vsmall': vsmall,
     }
+    losses = train(model, slurper, args.time, vbatch, vmask, device, tokenizer, vcompress, vcmask, vbits, args.gamma, ratiolr, reciplr, args.lr, args.epoch, hyper, args.save, args.o)
     if args.save != '':
         with open(args.save, 'wb') as f:
             torch.save({'hyper':hyper, 'model': model.state_dict(), 'dictionary': tokenizer.tokens}, f)
